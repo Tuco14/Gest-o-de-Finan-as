@@ -1,0 +1,6 @@
+{
+  "name": "FinControl - Gestão Financeira",
+  "description": "SaaS completo de controle financeiro pessoal e empresarial com gráficos interativos, fluxo de caixa, orçamentos e relatórios.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
