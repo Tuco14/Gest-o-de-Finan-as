@@ -1,0 +1,65 @@
+{
+  "entities": {
+    "User": {
+      "fields": {
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "createdAt": { "type": "string" }
+      }
+    },
+    "Transaction": {
+      "fields": {
+        "userId": { "type": "string" },
+        "description": { "type": "string" },
+        "amount": { "type": "number" },
+        "type": { "type": "string" },
+        "category": { "type": "string" },
+        "date": { "type": "string" },
+        "status": { "type": "string" },
+        "accountId": { "type": "string" },
+        "paymentMethod": { "type": "string" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string" }
+      }
+    },
+    "Account": {
+      "fields": {
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "institution": { "type": "string" },
+        "type": { "type": "string" },
+        "balance": { "type": "number" },
+        "color": { "type": "string" },
+        "iconName": { "type": "string" }
+      }
+    },
+    "Category": {
+      "fields": {
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "type": { "type": "string" },
+        "color": { "type": "string" },
+        "iconName": { "type": "string" },
+        "budgetMonthly": { "type": "number" }
+      }
+    },
+    "FinancialGoal": {
+      "fields": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "targetAmount": { "type": "number" },
+        "currentAmount": { "type": "number" },
+        "deadline": { "type": "string" },
+        "category": { "type": "string" },
+        "color": { "type": "string" }
+      }
+    }
+  },
+  "rules": {
+    "users": "request.auth != null && request.auth.uid == userId",
+    "transactions": "request.auth != null && (resource == null || resource.data.userId == request.auth.uid) && request.resource.data.userId == request.auth.uid",
+    "accounts": "request.auth != null && (resource == null || resource.data.userId == request.auth.uid) && request.resource.data.userId == request.auth.uid",
+    "categories": "request.auth != null && (resource == null || resource.data.userId == request.auth.uid) && request.resource.data.userId == request.auth.uid",
+    "goals": "request.auth != null && (resource == null || resource.data.userId == request.auth.uid) && request.resource.data.userId == request.auth.uid"
+  }
+}

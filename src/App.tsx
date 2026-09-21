@@ -32,6 +32,22 @@ import {
   Sparkles, 
   Shield 
 } from 'lucide-react';
+import { 
+  auth, 
+  db, 
+  onAuthStateChanged, 
+  collection, 
+  doc, 
+  setDoc, 
+  deleteDoc, 
+  onSnapshot, 
+  query, 
+  where,
+  writeBatch,
+  type User as FirebaseUser 
+} from './lib/firebase';
+import { AuthModal } from './components/AuthModal';
+import { MonthlyReportModal } from './components/MonthlyReportModal';
 
 const APP_STORAGE_VERSION = 'fincontrol_v2_zeroed';
 
@@ -99,6 +115,157 @@ export default function App() {
   const [modalInitialType, setModalInitialType] = useState<TransactionType>('expense');
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Autenticação e Nuvem
+  const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [isReportModalOpen, setIsReportModalOpen] = useState<boolean>(false);
+
+  // Monitorar estado de autenticação
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, user => {
+      setCurrentUser(user);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Monitorar Firestore em tempo real quando o usuário estiver autenticado
+  useEffect(() => {
+    if (!currentUser) return;
+
+    setIsSyncing(true);
+    const uid = currentUser.uid;
+
+    // Escuta transações do usuário
+    const qTx = query(collection(db, 'transactions'), where('userId', '==', uid));
+    const unsubTx = onSnapshot(
+      qTx,
+      snapshot => {
+        const cloudTxs: Transaction[] = [];
+        snapshot.forEach(docSnap => {
+          const data = docSnap.data();
+          cloudTxs.push({
+            id: docSnap.id,
+            description: data.description,
+            amount: Number(data.amount) || 0,
+            type: data.type,
+            category: data.category,
+            date: data.date,
+            status: data.status,
+            accountId: data.accountId,
+            paymentMethod: data.paymentMethod,
+            notes: data.notes || '',
+            createdAt: data.createdAt || new Date().toISOString(),
+          });
+        });
+
+        // Ordenar por data decrescente
+        cloudTxs.sort((a, b) => b.date.localeCompare(a.date));
+        setTransactions(cloudTxs);
+        setIsSyncing(false);
+      },
+      error => {
+        console.error('Erro ao sincronizar transações:', error);
+        setIsSyncing(false);
+      }
+    );
+
+    // Escuta contas do usuário
+    const qAcc = query(collection(db, 'accounts'), where('userId', '==', uid));
+    const unsubAcc = onSnapshot(
+      qAcc,
+      snapshot => {
+        if (!snapshot.empty) {
+          const cloudAccs: Account[] = [];
+          snapshot.forEach(docSnap => {
+            const data = docSnap.data();
+            cloudAccs.push({
+              id: docSnap.id,
+              name: data.name,
+              institution: data.institution,
+              type: data.type,
+              balance: Number(data.balance) || 0,
+              color: data.color,
+              iconName: data.iconName,
+            });
+          });
+          setAccounts(cloudAccs);
+        } else {
+          // Se na nuvem não existirem contas ainda para esse usuário, inicializa as contas padrão na nuvem
+          INITIAL_ACCOUNTS.forEach(async acc => {
+            await setDoc(doc(db, 'accounts', `${uid}_${acc.id}`), {
+              ...acc,
+              userId: uid,
+            });
+          });
+        }
+      },
+      err => console.error('Erro ao sincronizar contas:', err)
+    );
+
+    // Escuta categorias
+    const qCat = query(collection(db, 'categories'), where('userId', '==', uid));
+    const unsubCat = onSnapshot(
+      qCat,
+      snapshot => {
+        if (!snapshot.empty) {
+          const cloudCats: Category[] = [];
+          snapshot.forEach(docSnap => {
+            const data = docSnap.data();
+            cloudCats.push({
+              id: docSnap.id,
+              name: data.name,
+              type: data.type,
+              color: data.color,
+              iconName: data.iconName,
+              budgetMonthly: Number(data.budgetMonthly) || 0,
+            });
+          });
+          setCategories(cloudCats);
+        } else {
+          // Inicializa categorias padrão na nuvem
+          INITIAL_CATEGORIES.forEach(async cat => {
+            await setDoc(doc(db, 'categories', `${uid}_${cat.id}`), {
+              ...cat,
+              userId: uid,
+            });
+          });
+        }
+      },
+      err => console.error('Erro ao sincronizar categorias:', err)
+    );
+
+    // Escuta metas financeiras
+    const qGoals = query(collection(db, 'goals'), where('userId', '==', uid));
+    const unsubGoals = onSnapshot(
+      qGoals,
+      snapshot => {
+        const cloudGoals: FinancialGoal[] = [];
+        snapshot.forEach(docSnap => {
+          const data = docSnap.data();
+          cloudGoals.push({
+            id: docSnap.id,
+            title: data.title,
+            targetAmount: Number(data.targetAmount) || 0,
+            currentAmount: Number(data.currentAmount) || 0,
+            deadline: data.deadline,
+            category: data.category,
+            color: data.color,
+          });
+        });
+        setGoals(cloudGoals);
+      },
+      err => console.error('Erro ao sincronizar metas:', err)
+    );
+
+    return () => {
+      unsubTx();
+      unsubAcc();
+      unsubCat();
+      unsubGoals();
+    };
+  }, [currentUser]);
 
   // Sync to localStorage
   useEffect(() => {
@@ -172,7 +339,18 @@ export default function App() {
     setIsModalOpen(true);
   };
 
-  const handleSaveTransaction = (tx: Transaction) => {
+  const handleSaveTransaction = async (tx: Transaction) => {
+    if (currentUser) {
+      try {
+        await setDoc(doc(db, 'transactions', tx.id), {
+          ...tx,
+          userId: currentUser.uid,
+        });
+      } catch (err) {
+        console.error('Erro ao salvar no Firestore:', err);
+      }
+    }
+
     if (editingTransaction) {
       setTransactions(prev => prev.map(t => (t.id === tx.id ? tx : t)));
       showToast('Transação atualizada com sucesso!');
@@ -182,18 +360,40 @@ export default function App() {
     }
   };
 
-  const handleDeleteTransaction = (id: string) => {
+  const handleDeleteTransaction = async (id: string) => {
     if (confirm('Deseja realmente excluir este lançamento?')) {
+      if (currentUser) {
+        try {
+          await deleteDoc(doc(db, 'transactions', id));
+        } catch (err) {
+          console.error('Erro ao excluir no Firestore:', err);
+        }
+      }
       setTransactions(prev => prev.filter(t => t.id !== id));
       showToast('Transação excluída');
     }
   };
 
-  const handleToggleStatus = (id: string) => {
+  const handleToggleStatus = async (id: string) => {
+    const tx = transactions.find(t => t.id === id);
+    if (!tx) return;
+    const nextStatus = tx.status === 'paid' ? 'pending' : 'paid';
+
+    if (currentUser) {
+      try {
+        await setDoc(doc(db, 'transactions', id), {
+          ...tx,
+          status: nextStatus,
+          userId: currentUser.uid,
+        });
+      } catch (err) {
+        console.error('Erro ao atualizar status no Firestore:', err);
+      }
+    }
+
     setTransactions(prev =>
       prev.map(t => {
         if (t.id === id) {
-          const nextStatus = t.status === 'paid' ? 'pending' : 'paid';
           return { ...t, status: nextStatus };
         }
         return t;
@@ -203,49 +403,170 @@ export default function App() {
   };
 
   // Ações em massa (Bulk actions)
-  const handleBulkMarkPaid = (ids: string[]) => {
+  const handleBulkMarkPaid = async (ids: string[]) => {
     if (ids.length === 0) return;
     const idSet = new Set(ids);
+
+    if (currentUser) {
+      try {
+        const batch = writeBatch(db);
+        ids.forEach(id => {
+          const found = transactions.find(t => t.id === id);
+          if (found) {
+            batch.set(doc(db, 'transactions', id), {
+              ...found,
+              status: 'paid',
+              userId: currentUser.uid,
+            });
+          }
+        });
+        await batch.commit();
+      } catch (err) {
+        console.error('Erro na atualização em massa:', err);
+      }
+    }
+
     setTransactions(prev =>
       prev.map(t => (idSet.has(t.id) ? { ...t, status: 'paid' as const } : t))
     );
     showToast(`${ids.length} ${ids.length === 1 ? 'lançamento marcado' : 'lançamentos marcados'} como pago!`);
   };
 
-  const handleBulkDelete = (ids: string[]) => {
+  const handleBulkDelete = async (ids: string[]) => {
     if (ids.length === 0) return;
     if (confirm(`Atenção: deseja realmente excluir os ${ids.length} lançamentos selecionados?`)) {
+      if (currentUser) {
+        try {
+          const batch = writeBatch(db);
+          ids.forEach(id => {
+            batch.delete(doc(db, 'transactions', id));
+          });
+          await batch.commit();
+        } catch (err) {
+          console.error('Erro na exclusão em massa:', err);
+        }
+      }
       const idSet = new Set(ids);
       setTransactions(prev => prev.filter(t => !idSet.has(t.id)));
       showToast(`${ids.length} ${ids.length === 1 ? 'lançamento excluído' : 'lançamentos excluídos'} com sucesso!`);
     }
   };
 
-  const handleDuplicateTransaction = (tx: Transaction) => {
+  const handleDuplicateTransaction = async (tx: Transaction) => {
     const duplicated: Transaction = {
       ...tx,
       id: `tx-${Date.now()}`,
       description: `${tx.description} (Cópia)`,
       createdAt: new Date().toISOString(),
     };
+
+    if (currentUser) {
+      try {
+        await setDoc(doc(db, 'transactions', duplicated.id), {
+          ...duplicated,
+          userId: currentUser.uid,
+        });
+      } catch (err) {
+        console.error('Erro ao duplicar transação no Firestore:', err);
+      }
+    }
+
     setTransactions(prev => [duplicated, ...prev]);
     showToast('Transação duplicada!');
   };
 
   // Handlers para Categorias e Metas
-  const handleUpdateCategoryBudget = (catId: string, newBudget: number) => {
+  const handleUpdateCategoryBudget = async (catId: string, newBudget: number) => {
+    const cat = categories.find(c => c.id === catId);
+    if (cat && currentUser) {
+      try {
+        await setDoc(doc(db, 'categories', catId), {
+          ...cat,
+          budgetMonthly: newBudget,
+          userId: currentUser.uid,
+        });
+      } catch (err) {
+        console.error('Erro ao atualizar categoria no Firestore:', err);
+      }
+    }
+
     setCategories(prev =>
       prev.map(c => (c.id === catId ? { ...c, budgetMonthly: newBudget } : c))
     );
     showToast('Orçamento atualizado!');
   };
 
-  const handleAddGoal = (goal: FinancialGoal) => {
+  const handleAddCategory = async (newCat: Category): Promise<Category> => {
+    if (currentUser) {
+      try {
+        await setDoc(doc(db, 'categories', newCat.id), {
+          ...newCat,
+          userId: currentUser.uid,
+        });
+      } catch (err) {
+        console.error('Erro ao salvar categoria no Firestore:', err);
+      }
+    }
+
+    setCategories(prev => {
+      const exists = prev.some(c => c.id === newCat.id);
+      if (exists) {
+        return prev.map(c => (c.id === newCat.id ? newCat : c));
+      }
+      return [...prev, newCat];
+    });
+
+    showToast(`Categoria "${newCat.name}" salva com sucesso!`);
+    return newCat;
+  };
+
+  const handleDeleteCategory = async (catId: string): Promise<void> => {
+    const cat = categories.find(c => c.id === catId);
+    const catName = cat?.name || 'Categoria';
+
+    if (currentUser) {
+      try {
+        await deleteDoc(doc(db, 'categories', catId));
+        await deleteDoc(doc(db, 'categories', `${currentUser.uid}_${catId}`));
+      } catch (err) {
+        console.error('Erro ao deletar categoria no Firestore:', err);
+      }
+    }
+
+    setCategories(prev => prev.filter(c => c.id !== catId && c.id !== `${currentUser?.uid}_${catId}`));
+    showToast(`Categoria "${catName}" apagada com sucesso!`);
+  };
+
+  const handleAddGoal = async (goal: FinancialGoal) => {
+    if (currentUser) {
+      try {
+        await setDoc(doc(db, 'goals', goal.id), {
+          ...goal,
+          userId: currentUser.uid,
+        });
+      } catch (err) {
+        console.error('Erro ao salvar meta no Firestore:', err);
+      }
+    }
+
     setGoals(prev => [...prev, goal]);
     showToast('Nova meta financeira criada!');
   };
 
-  const handleUpdateGoalAmount = (goalId: string, addAmount: number) => {
+  const handleUpdateGoalAmount = async (goalId: string, addAmount: number) => {
+    const goal = goals.find(g => g.id === goalId);
+    if (goal && currentUser) {
+      try {
+        await setDoc(doc(db, 'goals', goalId), {
+          ...goal,
+          currentAmount: goal.currentAmount + addAmount,
+          userId: currentUser.uid,
+        });
+      } catch (err) {
+        console.error('Erro ao atualizar meta no Firestore:', err);
+      }
+    }
+
     setGoals(prev =>
       prev.map(g =>
         g.id === goalId ? { ...g, currentAmount: g.currentAmount + addAmount } : g
@@ -254,24 +575,60 @@ export default function App() {
     showToast(`Aporte de ${formatCurrency(addAmount)} adicionado à meta!`);
   };
 
-  const handleDeleteGoal = (goalId: string) => {
+  const handleDeleteGoal = async (goalId: string) => {
+    if (currentUser) {
+      try {
+        await deleteDoc(doc(db, 'goals', goalId));
+      } catch (err) {
+        console.error('Erro ao remover meta no Firestore:', err);
+      }
+    }
     setGoals(prev => prev.filter(g => g.id !== goalId));
     showToast('Meta removida');
   };
 
   // Handlers para Contas
-  const handleAddAccount = (acc: Account) => {
+  const handleAddAccount = async (acc: Account) => {
+    if (currentUser) {
+      try {
+        await setDoc(doc(db, 'accounts', acc.id), {
+          ...acc,
+          userId: currentUser.uid,
+        });
+      } catch (err) {
+        console.error('Erro ao salvar conta no Firestore:', err);
+      }
+    }
     setAccounts(prev => [...prev, acc]);
     showToast('Conta adicionada com sucesso!');
   };
 
-  const handleDeleteAccount = (accId: string) => {
+  const handleDeleteAccount = async (accId: string) => {
     const accountToDelete = accounts.find(a => a.id === accId);
+    if (currentUser) {
+      try {
+        await deleteDoc(doc(db, 'accounts', accId));
+      } catch (err) {
+        console.error('Erro ao excluir conta no Firestore:', err);
+      }
+    }
     setAccounts(prev => prev.filter(a => a.id !== accId));
     showToast(`Conta "${accountToDelete?.name || 'selecionada'}" removida com sucesso!`);
   };
 
-  const handleUpdateBalance = (accId: string, newBalance: number) => {
+  const handleUpdateBalance = async (accId: string, newBalance: number) => {
+    const acc = accounts.find(a => a.id === accId);
+    if (acc && currentUser) {
+      try {
+        await setDoc(doc(db, 'accounts', accId), {
+          ...acc,
+          balance: newBalance,
+          userId: currentUser.uid,
+        });
+      } catch (err) {
+        console.error('Erro ao atualizar saldo no Firestore:', err);
+      }
+    }
     setAccounts(prev =>
       prev.map(a => (a.id === accId ? { ...a, balance: newBalance } : a))
     );
@@ -353,7 +710,11 @@ export default function App() {
         setActiveTab={setActiveTab}
         onOpenNewTransaction={handleOpenNewTransaction}
         onExportCSV={handleExportCSV}
+        onOpenMonthlyReport={() => setIsReportModalOpen(true)}
         transactionsCount={transactions.length}
+        user={currentUser}
+        onOpenAuth={() => setIsAuthModalOpen(true)}
+        isSyncing={isSyncing}
       />
 
       {/* Conteúdo Principal */}
@@ -450,6 +811,8 @@ export default function App() {
               onAddGoal={handleAddGoal}
               onUpdateGoalAmount={handleUpdateGoalAmount}
               onDeleteGoal={handleDeleteGoal}
+              onAddCategory={handleAddCategory}
+              onDeleteCategory={handleDeleteCategory}
             />
           </div>
         )}
@@ -461,6 +824,7 @@ export default function App() {
               categories={categories}
               currentMonth={currentMonth}
               privacyMode={privacyMode}
+              onOpenMonthlyReport={() => setIsReportModalOpen(true)}
             />
           </div>
         )}
@@ -476,6 +840,14 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-4">
+            <button
+              onClick={() => setIsReportModalOpen(true)}
+              className="hover:text-lime-400 transition-colors flex items-center gap-1.5 cursor-pointer font-medium"
+              title="Gerar e exportar resumo mensal em PDF formatado"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 text-lime-400" />
+              <span>Resumo em PDF</span>
+            </button>
             <button
               onClick={handleExportCSV}
               className="hover:text-lime-400 transition-colors flex items-center gap-1 cursor-pointer"
@@ -508,6 +880,29 @@ export default function App() {
         editingTransaction={editingTransaction}
         initialType={modalInitialType}
         currentMonth={currentMonth}
+        onAddCategory={handleAddCategory}
+        onDeleteCategory={handleDeleteCategory}
+      />
+
+      {/* Modal de Autenticação e Sincronização em Nuvem */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        user={currentUser}
+        onSuccessToast={showToast}
+      />
+
+      {/* Modal de Exportação do Resumo Mensal em PDF */}
+      <MonthlyReportModal
+        isOpen={isReportModalOpen}
+        onClose={() => setIsReportModalOpen(false)}
+        currentMonth={currentMonth}
+        transactions={transactions}
+        accounts={accounts}
+        categories={categories}
+        goals={goals}
+        userEmail={currentUser?.email}
+        onToast={showToast}
       />
     </div>
   );

@@ -10,7 +10,8 @@ import {
   Scale, 
   ArrowUpRight, 
   CheckCircle2,
-  PieChart
+  PieChart,
+  FileText
 } from 'lucide-react';
 
 interface ReportsViewProps {
@@ -18,6 +19,7 @@ interface ReportsViewProps {
   categories: Category[];
   currentMonth: string;
   privacyMode: boolean;
+  onOpenMonthlyReport?: () => void;
 }
 
 export const ReportsView: React.FC<ReportsViewProps> = ({
@@ -25,6 +27,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   categories,
   currentMonth,
   privacyMode,
+  onOpenMonthlyReport,
 }) => {
   const categoryMap = useMemo(() => new Map(categories.map(c => [c.id, c])), [categories]);
 
@@ -120,6 +123,16 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             <p className="text-zinc-400 text-xs mt-1 max-w-lg">
               Avaliação algorítmica do seu equilíbrio entre ganhos, custos essenciais e capacidade de poupança no período.
             </p>
+            {onOpenMonthlyReport && (
+              <button
+                id="report-banner-pdf-btn"
+                onClick={onOpenMonthlyReport}
+                className="mt-3.5 inline-flex items-center gap-2 px-3.5 py-1.5 bg-lime-400 hover:bg-lime-300 text-zinc-950 text-xs font-bold rounded-xl transition-all shadow-md shadow-lime-400/20 cursor-pointer"
+              >
+                <FileText className="w-4 h-4 stroke-[2.5]" />
+                <span>Exportar Resumo Mensal em PDF</span>
+              </button>
+            )}
           </div>
 
           <div className="flex items-center gap-4 bg-zinc-800/80 backdrop-blur-md px-6 py-4 rounded-2xl border border-zinc-700">

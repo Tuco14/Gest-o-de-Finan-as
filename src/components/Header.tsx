@@ -11,10 +11,14 @@ import {
   ReceiptText, 
   Target, 
   BarChart3,
-  Calendar
+  Calendar,
+  Cloud,
+  CheckCircle2,
+  User as UserIcon,
+  FileText
 } from 'lucide-react';
 import { formatMonthYear } from '../utils/formatters';
-import { PWAInstallButton } from './PWAInstallButton';
+import type { User as FirebaseUser } from '../lib/firebase';
 
 interface HeaderProps {
   currentMonth: string; // YYYY-MM
@@ -25,7 +29,11 @@ interface HeaderProps {
   setActiveTab: (tab: 'overview' | 'transactions' | 'budgets' | 'reports') => void;
   onOpenNewTransaction: (type?: 'income' | 'expense') => void;
   onExportCSV: () => void;
+  onOpenMonthlyReport: () => void;
   transactionsCount: number;
+  user: FirebaseUser | null;
+  onOpenAuth: () => void;
+  isSyncing?: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -37,6 +45,10 @@ export const Header: React.FC<HeaderProps> = ({
   setActiveTab,
   onOpenNewTransaction,
   onExportCSV,
+  onOpenMonthlyReport,
+  user,
+  onOpenAuth,
+  isSyncing,
 }) => {
   // Funções para navegar entre meses
   const handlePrevMonth = () => {
@@ -122,6 +134,38 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Action Buttons */}
           <div className="flex items-center gap-2">
+            {/* Cloud Sync / Auth Status */}
+            <button
+              id="cloud-sync-btn"
+              onClick={onOpenAuth}
+              className={`flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-xl border transition-all cursor-pointer ${
+                user
+                  ? 'bg-lime-400/10 text-lime-400 border-lime-400/30 hover:bg-lime-400/20'
+                  : 'bg-zinc-800 text-zinc-300 border-zinc-700 hover:text-white hover:bg-zinc-750'
+              }`}
+              title={
+                user
+                  ? `Conectado como ${user.email}. Clique para gerenciar conta.`
+                  : 'Entrar na conta para sincronizar dados em outros computadores e navegadores'
+              }
+            >
+              {user ? (
+                <>
+                  <CheckCircle2 className="w-4 h-4 text-lime-400 shrink-0" />
+                  <span className="hidden sm:inline">
+                    {isSyncing ? 'Sincronizando...' : 'Nuvem Conectada'}
+                  </span>
+                  <span className="sm:hidden">Nuvem</span>
+                </>
+              ) : (
+                <>
+                  <Cloud className="w-4 h-4 text-zinc-400 shrink-0" />
+                  <span className="hidden sm:inline">Sincronizar Nuvem</span>
+                  <span className="sm:hidden">Nuvem</span>
+                </>
+              )}
+            </button>
+
             {/* Privacy toggle */}
             <button
               id="privacy-toggle-btn"
@@ -133,19 +177,28 @@ export const Header: React.FC<HeaderProps> = ({
               {privacyMode ? <EyeOff className="w-5 h-5 text-lime-400" /> : <Eye className="w-5 h-5" />}
             </button>
 
+            {/* Exportar Resumo Mensal em PDF */}
+            <button
+              id="export-monthly-pdf-btn"
+              onClick={onOpenMonthlyReport}
+              className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-zinc-200 hover:text-white bg-zinc-800/90 hover:bg-zinc-750 rounded-xl border border-zinc-700 hover:border-lime-400/40 shadow-xs transition-all cursor-pointer"
+              title="Exportar Resumo Mensal formatado em PDF com gráficos e saldos"
+            >
+              <FileText className="w-4 h-4 text-lime-400 shrink-0" />
+              <span className="hidden sm:inline">Relatório PDF</span>
+              <span className="sm:hidden">PDF</span>
+            </button>
+
             {/* Export CSV */}
             <button
               id="export-csv-btn"
               onClick={onExportCSV}
-              className="hidden md:flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-xl border border-zinc-700 transition-colors cursor-pointer"
+              className="hidden lg:flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-xl border border-zinc-750 transition-colors cursor-pointer"
               title="Exportar dados para planilha CSV"
             >
               <Download className="w-4 h-4 text-zinc-400" />
-              <span>Exportar</span>
+              <span>CSV</span>
             </button>
-
-            {/* PWA In-App Install Button */}
-            <PWAInstallButton />
 
             {/* Nova Transação CTA: Verde Limão Amarelado */}
             <button

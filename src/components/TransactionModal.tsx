@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { Transaction, Category, Account, TransactionType, TransactionStatus, PaymentMethod } from '../types';
 import { CategoryIcon } from './CategoryIcon';
+import { CategorySelect } from './CategorySelect';
 import { generateId } from '../utils/formatters';
 
 interface TransactionModalProps {
@@ -24,6 +25,8 @@ interface TransactionModalProps {
   editingTransaction?: Transaction | null;
   initialType?: TransactionType;
   currentMonth: string;
+  onAddCategory: (category: Category) => Promise<Category> | void;
+  onDeleteCategory: (categoryId: string) => Promise<void> | void;
 }
 
 export const TransactionModal: React.FC<TransactionModalProps> = ({
@@ -35,6 +38,8 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
   editingTransaction,
   initialType = 'expense',
   currentMonth,
+  onAddCategory,
+  onDeleteCategory,
 }) => {
   const [type, setType] = useState<TransactionType>(initialType);
   const [description, setDescription] = useState('');
@@ -252,22 +257,27 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
           {/* Categoria e Data em 2 colunas */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-zinc-300 mb-1.5 uppercase tracking-wide flex items-center gap-1">
-                <Tag className="w-3.5 h-3.5 text-zinc-400" />
-                <span>Categoria *</span>
+              <label className="block text-xs font-semibold text-zinc-300 mb-1.5 uppercase tracking-wide flex items-center justify-between">
+                <span className="flex items-center gap-1">
+                  <Tag className="w-3.5 h-3.5 text-zinc-400" />
+                  <span>Categoria *</span>
+                </span>
+                <span className="text-[10px] text-zinc-400 font-normal">
+                  Criar / Apagar
+                </span>
               </label>
-              <select
-                id="transaction-category-select"
-                value={categoryId}
-                onChange={e => setCategoryId(e.target.value)}
-                className="w-full px-3 py-2.5 bg-zinc-800 border border-zinc-700 rounded-xl text-xs font-medium text-white focus:outline-hidden focus:ring-2 focus:ring-lime-400/20 focus:border-lime-400 cursor-pointer"
-              >
-                {filteredCategories.map(cat => (
-                  <option key={cat.id} value={cat.id}>
-                    {cat.name}
-                  </option>
-                ))}
-              </select>
+              <CategorySelect
+                categories={categories}
+                selectedCategoryId={categoryId}
+                onSelectCategory={id => {
+                  setCategoryId(id);
+                  if (errors.categoryId) setErrors(prev => ({ ...prev, categoryId: '' }));
+                }}
+                transactionType={type}
+                onAddCategory={onAddCategory}
+                onDeleteCategory={onDeleteCategory}
+                error={errors.categoryId}
+              />
             </div>
 
             <div>
