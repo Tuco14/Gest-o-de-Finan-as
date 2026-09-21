@@ -21,7 +21,9 @@ import {
   Copy, 
   Plus, 
   SlidersHorizontal,
-  X
+  X,
+  ListChecks,
+  CheckCheck
 } from 'lucide-react';
 
 interface TransactionListProps {
@@ -36,6 +38,8 @@ interface TransactionListProps {
   onOpenNew: (type?: TransactionType) => void;
   selectedCategoryFilter?: string;
   onClearCategoryFilter?: () => void;
+  onBulkDelete?: (ids: string[]) => void;
+  onBulkMarkPaid?: (ids: string[]) => void;
 }
 
 export const TransactionList: React.FC<TransactionListProps> = ({
@@ -50,6 +54,8 @@ export const TransactionList: React.FC<TransactionListProps> = ({
   onOpenNew,
   selectedCategoryFilter,
   onClearCategoryFilter,
+  onBulkDelete,
+  onBulkMarkPaid,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [typeFilter, setTypeFilter] = useState<'all' | TransactionType>('all');
@@ -57,7 +63,8 @@ export const TransactionList: React.FC<TransactionListProps> = ({
   const [accountFilter, setAccountFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | TransactionStatus>('all');
   const [sortBy, setSortBy] = useState<'date-desc' | 'date-asc' | 'amount-desc' | 'amount-asc'>('date-desc');
-  const [actionMenuOpenId, setActionMenuOpenId] = useState<string | null>(null);
+  const [isBulkMode, setIsBulkMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   // Sync category filter if prop changes
   React.useEffect(() => {
@@ -123,8 +130,60 @@ export const TransactionList: React.FC<TransactionListProps> = ({
     onClearCategoryFilter?.();
   };
 
+  // Funções para Ações em Massa
+  const isAllSelected = filteredTransactions.length > 0 && filteredTransactions.every(tx => selectedIds.has(tx.id));
+
+  const toggleSelectAll = () => {
+    if (isAllSelected) {
+      setSelectedIds(prev => {
+        const next = new Set(prev);
+        filteredTransactions.forEach(tx => next.delete(tx.id));
+        return next;
+      });
+    } else {
+      setSelectedIds(prev => {
+        const next = new Set(prev);
+        filteredTransactions.forEach(tx => next.add(tx.id));
+        return next;
+      });
+    }
+  };
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleBulkMarkPaidAction = () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    if (onBulkMarkPaid) {
+      onBulkMarkPaid(ids);
+    } else {
+      ids.forEach(id => onToggleStatus(id));
+    }
+    setSelectedIds(new Set());
+  };
+
+  const handleBulkDeleteAction = () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    if (onBulkDelete) {
+      onBulkDelete(ids);
+    } else {
+      if (confirm(`Deseja realmente excluir ${ids.length} transações selecionadas?`)) {
+        ids.forEach(id => onDelete(id));
+      }
+    }
+    setSelectedIds(new Set());
+  };
+
   return (
-    <div className="space-y-4">
+    <div className="transaction-list-container space-y-4">
       {/* Barra de Filtros e Busca */}
       <div className="bg-zinc-900 rounded-2xl p-4 border border-zinc-800 shadow-md space-y-3">
         <div className="flex flex-col md:flex-row gap-3 items-center justify-between">
@@ -150,8 +209,34 @@ export const TransactionList: React.FC<TransactionListProps> = ({
             )}
           </div>
 
-          {/* Filtros em Linha */}
+          {/* Filtros em Linha + Botão Ações em Massa */}
           <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+            {/* Botão Ações em Massa */}
+            <button
+              id="bulk-actions-btn"
+              onClick={() => {
+                const next = !isBulkMode;
+                setIsBulkMode(next);
+                if (!next) setSelectedIds(new Set());
+              }}
+              className={`px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border ${
+                isBulkMode
+                  ? 'bg-lime-400 text-zinc-950 border-lime-400 shadow-sm shadow-lime-400/20'
+                  : 'bg-zinc-800 text-zinc-200 border-zinc-700 hover:bg-zinc-750 hover:text-white'
+              }`}
+              title="Ativar seleção múltipla para marcar como pagas ou excluir de uma vez"
+            >
+              <ListChecks className="w-4 h-4" />
+              <span>Ações em Massa</span>
+              {selectedIds.size > 0 && (
+                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold ${
+                  isBulkMode ? 'bg-zinc-950 text-lime-400' : 'bg-lime-400 text-zinc-950'
+                }`}>
+                  {selectedIds.size}
+                </span>
+              )}
+            </button>
+
             {/* Tipo */}
             <select
               id="filter-type-select"
@@ -219,6 +304,73 @@ export const TransactionList: React.FC<TransactionListProps> = ({
           </div>
         </div>
 
+        {/* Barra de Ações em Massa (visível quando ativada) */}
+        {isBulkMode && (
+          <div
+            id="bulk-actions-toolbar"
+            className="p-3 bg-zinc-850 border border-lime-400/30 rounded-xl flex flex-wrap items-center justify-between gap-3 animate-in fade-in slide-in-from-top-1 duration-150"
+          >
+            <div className="flex items-center gap-3">
+              <label className="flex items-center gap-2 text-xs font-semibold text-white cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={isAllSelected}
+                  onChange={toggleSelectAll}
+                  className="w-4 h-4 rounded bg-zinc-900 border-zinc-700 text-lime-400 accent-lime-400 cursor-pointer"
+                />
+                <span>Selecionar Todos ({filteredTransactions.length})</span>
+              </label>
+
+              <span className="text-xs text-zinc-400">
+                • <strong className="text-lime-400">{selectedIds.size}</strong> selecionado(s)
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                id="bulk-mark-paid-btn"
+                onClick={handleBulkMarkPaidAction}
+                disabled={selectedIds.size === 0}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                  selectedIds.size > 0
+                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500/30'
+                    : 'bg-zinc-800/60 text-zinc-600 border border-zinc-800 cursor-not-allowed'
+                }`}
+                title="Marcar transações selecionadas como pagas"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Marcar como Pagas ({selectedIds.size})</span>
+              </button>
+
+              <button
+                id="bulk-delete-btn"
+                onClick={handleBulkDeleteAction}
+                disabled={selectedIds.size === 0}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                  selectedIds.size > 0
+                    ? 'bg-rose-500/20 text-rose-400 border border-rose-500/40 hover:bg-rose-500/30'
+                    : 'bg-zinc-800/60 text-zinc-600 border border-zinc-800 cursor-not-allowed'
+                }`}
+                title="Excluir transações selecionadas de uma só vez"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                <span>Excluir Selecionadas ({selectedIds.size})</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  setIsBulkMode(false);
+                  setSelectedIds(new Set());
+                }}
+                className="p-1.5 text-zinc-400 hover:text-white rounded-lg hover:bg-zinc-800 cursor-pointer ml-1"
+                title="Fechar modo de ações em massa"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Resumo dos registros filtrados */}
         <div className="flex flex-wrap items-center justify-between text-xs pt-2 border-t border-zinc-800 text-zinc-400">
           <div>
@@ -274,6 +426,17 @@ export const TransactionList: React.FC<TransactionListProps> = ({
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="border-b border-zinc-800 bg-zinc-850/80 text-[11px] font-bold text-zinc-400 uppercase tracking-wider">
+                  {isBulkMode && (
+                    <th className="py-3.5 px-3 w-10 text-center">
+                      <input
+                        type="checkbox"
+                        checked={isAllSelected}
+                        onChange={toggleSelectAll}
+                        className="w-4 h-4 rounded bg-zinc-900 border-zinc-700 text-lime-400 accent-lime-400 cursor-pointer"
+                        title="Selecionar todos os lançamentos"
+                      />
+                    </th>
+                  )}
                   <th className="py-3.5 px-4">Lançamento</th>
                   <th className="py-3.5 px-4">Categoria</th>
                   <th className="py-3.5 px-4">Conta / Método</th>
@@ -288,12 +451,32 @@ export const TransactionList: React.FC<TransactionListProps> = ({
                   const cat = categoryMap.get(tx.category);
                   const acc = accountMap.get(tx.accountId);
                   const isExpense = tx.type === 'expense';
+                  const isSelected = selectedIds.has(tx.id);
 
                   return (
                     <tr 
                       key={tx.id} 
-                      className="hover:bg-zinc-800/50 transition-colors group"
+                      onClick={isBulkMode ? () => toggleSelect(tx.id) : undefined}
+                      className={`hover:bg-zinc-800/50 transition-colors group ${
+                        isBulkMode ? 'cursor-pointer' : ''
+                      } ${
+                        isBulkMode && isSelected
+                          ? 'bg-lime-400/10 hover:bg-lime-400/15 ring-1 ring-inset ring-lime-400/30'
+                          : ''
+                      }`}
                     >
+                      {/* Checkbox de Seleção em Massa */}
+                      {isBulkMode && (
+                        <td className="py-3.5 px-3 text-center" onClick={e => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleSelect(tx.id)}
+                            className="w-4 h-4 rounded bg-zinc-900 border-zinc-700 text-lime-400 accent-lime-400 cursor-pointer"
+                          />
+                        </td>
+                      )}
+
                       {/* Descrição & Ícone */}
                       <td className="py-3.5 px-4">
                         <div className="flex items-center gap-3">

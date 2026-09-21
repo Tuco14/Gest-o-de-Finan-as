@@ -22,6 +22,7 @@ import { BudgetsView } from './components/BudgetsView';
 import { ReportsView } from './components/ReportsView';
 import { AccountsSummary } from './components/AccountsSummary';
 import { UpcomingBills } from './components/UpcomingBills';
+import { OfflineIndicator } from './components/OfflineIndicator';
 import { formatCurrency } from './utils/formatters';
 import { 
   CheckCircle, 
@@ -31,6 +32,20 @@ import {
   Sparkles, 
   Shield 
 } from 'lucide-react';
+
+const APP_STORAGE_VERSION = 'fincontrol_v2_zeroed';
+
+// Se for primeira vez com a versão limpa, remove os dados de demonstração anteriores
+if (typeof window !== 'undefined') {
+  const currentVersion = localStorage.getItem('fincontrol_version');
+  if (currentVersion !== APP_STORAGE_VERSION) {
+    localStorage.removeItem('fincontrol_transactions');
+    localStorage.removeItem('fincontrol_categories');
+    localStorage.removeItem('fincontrol_accounts');
+    localStorage.removeItem('fincontrol_goals');
+    localStorage.setItem('fincontrol_version', APP_STORAGE_VERSION);
+  }
+}
 
 export default function App() {
   // LocalStorage initialization
@@ -66,11 +81,12 @@ export default function App() {
     return INITIAL_GOALS;
   });
 
-  // Estado do mês ativo (YYYY-MM)
+  // Estado do mês ativo (YYYY-MM atual do sistema)
   const [currentMonth, setCurrentMonth] = useState<string>(() => {
     const now = new Date();
-    // Default to 2026-09 as per mock time context
-    return '2026-09';
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    return `${year}-${month}`;
   });
 
   const [privacyMode, setPrivacyMode] = useState<boolean>(() => {
@@ -186,6 +202,25 @@ export default function App() {
     showToast('Status da transação alterado');
   };
 
+  // Ações em massa (Bulk actions)
+  const handleBulkMarkPaid = (ids: string[]) => {
+    if (ids.length === 0) return;
+    const idSet = new Set(ids);
+    setTransactions(prev =>
+      prev.map(t => (idSet.has(t.id) ? { ...t, status: 'paid' as const } : t))
+    );
+    showToast(`${ids.length} ${ids.length === 1 ? 'lançamento marcado' : 'lançamentos marcados'} como pago!`);
+  };
+
+  const handleBulkDelete = (ids: string[]) => {
+    if (ids.length === 0) return;
+    if (confirm(`Atenção: deseja realmente excluir os ${ids.length} lançamentos selecionados?`)) {
+      const idSet = new Set(ids);
+      setTransactions(prev => prev.filter(t => !idSet.has(t.id)));
+      showToast(`${ids.length} ${ids.length === 1 ? 'lançamento excluído' : 'lançamentos excluídos'} com sucesso!`);
+    }
+  };
+
   const handleDuplicateTransaction = (tx: Transaction) => {
     const duplicated: Transaction = {
       ...tx,
@@ -230,6 +265,12 @@ export default function App() {
     showToast('Conta adicionada com sucesso!');
   };
 
+  const handleDeleteAccount = (accId: string) => {
+    const accountToDelete = accounts.find(a => a.id === accId);
+    setAccounts(prev => prev.filter(a => a.id !== accId));
+    showToast(`Conta "${accountToDelete?.name || 'selecionada'}" removida com sucesso!`);
+  };
+
   const handleUpdateBalance = (accId: string, newBalance: number) => {
     setAccounts(prev =>
       prev.map(a => (a.id === accId ? { ...a, balance: newBalance } : a))
@@ -267,18 +308,19 @@ export default function App() {
     showToast('Relatório CSV baixado com sucesso!');
   };
 
-  // Reset para dados iniciais
+  // Reset para dados zerados
   const handleResetData = () => {
-    if (confirm('Atenção: deseja restaurar todos os dados para o padrão inicial de demonstração?')) {
+    if (confirm('Atenção: deseja zerar todos os lançamentos, saldos e metas para reiniciar o aplicativo do zero?')) {
       localStorage.removeItem('fincontrol_transactions');
       localStorage.removeItem('fincontrol_categories');
       localStorage.removeItem('fincontrol_accounts');
       localStorage.removeItem('fincontrol_goals');
+      localStorage.setItem('fincontrol_version', APP_STORAGE_VERSION);
       setTransactions(INITIAL_TRANSACTIONS);
       setCategories(INITIAL_CATEGORIES);
       setAccounts(INITIAL_ACCOUNTS);
       setGoals(INITIAL_GOALS);
-      showToast('Dados restaurados com sucesso!');
+      showToast('Todos os valores foram zerados! O app está pronto para seu uso.');
     }
   };
 
@@ -290,6 +332,9 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col font-sans">
+      {/* Offline Status Badge */}
+      <OfflineIndicator />
+
       {/* Toast Notification */}
       {toastMessage && (
         <div className="fixed bottom-6 right-6 z-50 bg-zinc-900 text-white px-4 py-3 rounded-2xl shadow-xl border border-zinc-700 flex items-center gap-2.5 text-xs font-semibold animate-in fade-in slide-in-from-bottom-3 duration-200">
@@ -356,6 +401,7 @@ export default function App() {
                   privacyMode={privacyMode}
                   onAddAccount={handleAddAccount}
                   onUpdateBalance={handleUpdateBalance}
+                  onDeleteAccount={handleDeleteAccount}
                 />
               </div>
               <div className="lg:col-span-5">
@@ -386,6 +432,8 @@ export default function App() {
               onOpenNew={handleOpenNewTransaction}
               selectedCategoryFilter={selectedCategoryFilter}
               onClearCategoryFilter={() => setSelectedCategoryFilter('')}
+              onBulkDelete={handleBulkDelete}
+              onBulkMarkPaid={handleBulkMarkPaid}
             />
           </div>
         )}
@@ -438,10 +486,10 @@ export default function App() {
             <button
               onClick={handleResetData}
               className="hover:text-rose-400 transition-colors flex items-center gap-1 cursor-pointer"
-              title="Restaurar dados iniciais"
+              title="Zerar todos os lançamentos e valores do aplicativo"
             >
               <RotateCcw className="w-3.5 h-3.5" />
-              <span>Restaurar Demonstração</span>
+              <span>Zerar Dados</span>
             </button>
           </div>
         </div>

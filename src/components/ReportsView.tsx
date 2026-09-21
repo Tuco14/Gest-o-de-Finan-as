@@ -86,6 +86,8 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       .sort((a, b) => b.amount - a.amount)
       .slice(0, 5);
 
+    const hasData = income > 0 || expense > 0;
+
     return {
       income,
       expense,
@@ -96,6 +98,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       needsRate,
       wantsRate,
       score,
+      hasData,
       topExpenses,
     };
   }, [transactions, currentMonth]);
@@ -122,21 +125,25 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           <div className="flex items-center gap-4 bg-zinc-800/80 backdrop-blur-md px-6 py-4 rounded-2xl border border-zinc-700">
             <div className="text-center">
               <span className="text-4xl font-extrabold tracking-tight text-lime-400">
-                {stats.score}
+                {stats.hasData ? stats.score : '--'}
               </span>
               <span className="text-xs text-zinc-400 font-semibold block">/100 pontos</span>
             </div>
             <div className="h-10 w-px bg-zinc-700" />
             <div>
               <span className="text-xs font-bold text-white block">
-                {stats.score >= 80
+                {!stats.hasData
+                  ? 'Pronto para o Uso'
+                  : stats.score >= 80
                   ? 'Saúde Financeira Blindada'
                   : stats.score >= 65
                   ? 'Perfil Financeiro Saudável'
                   : 'Atenção aos Custos Fixos'}
               </span>
               <span className="text-[11px] text-zinc-400">
-                {stats.savingsRate >= 20
+                {!stats.hasData
+                  ? 'Lance suas receitas e despesas para gerar o diagnóstico'
+                  : stats.savingsRate >= 20
                   ? `Guardando ${stats.savingsRate.toFixed(1)}% das receitas`
                   : 'Foque em reduzir gastos com estilo de vida'}
               </span>
@@ -232,36 +239,42 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </p>
 
             <div className="divide-y divide-zinc-800">
-              {stats.topExpenses.map((tx, idx) => {
-                const cat = categoryMap.get(tx.category);
-                const percentOfTotal = stats.expense > 0 ? (tx.amount / stats.expense) * 100 : 0;
+              {stats.topExpenses.length === 0 ? (
+                <div className="py-8 text-center text-xs text-zinc-500">
+                  Nenhuma despesa registrada neste mês ainda.
+                </div>
+              ) : (
+                stats.topExpenses.map((tx, idx) => {
+                  const cat = categoryMap.get(tx.category);
+                  const percentOfTotal = stats.expense > 0 ? (tx.amount / stats.expense) * 100 : 0;
 
-                return (
-                  <div key={tx.id} className="py-3 flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-3">
-                      <span className="w-6 h-6 rounded-lg bg-zinc-800 text-zinc-300 font-bold text-xs flex items-center justify-center shrink-0">
-                        {idx + 1}
-                      </span>
-                      <div>
-                        <span className="font-semibold text-white text-xs block">
-                          {tx.description}
+                  return (
+                    <div key={tx.id} className="py-3 flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-3">
+                        <span className="w-6 h-6 rounded-lg bg-zinc-800 text-zinc-300 font-bold text-xs flex items-center justify-center shrink-0">
+                          {idx + 1}
                         </span>
-                        <span className="text-[11px] text-zinc-400">
-                          {cat?.name} • {tx.paymentMethod}
+                        <div>
+                          <span className="font-semibold text-white text-xs block">
+                            {tx.description}
+                          </span>
+                          <span className="text-[11px] text-zinc-400">
+                            {cat?.name} • {tx.paymentMethod}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <span className="font-bold text-rose-400 text-xs block">
+                          {formatCurrency(tx.amount, privacyMode)}
+                        </span>
+                        <span className="text-[10px] text-zinc-400">
+                          {percentOfTotal.toFixed(1)}% do mês
                         </span>
                       </div>
                     </div>
-                    <div className="text-right">
-                      <span className="font-bold text-rose-400 text-xs block">
-                        {formatCurrency(tx.amount, privacyMode)}
-                      </span>
-                      <span className="text-[10px] text-zinc-400">
-                        {percentOfTotal.toFixed(1)}% do mês
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                })
+              )}
             </div>
           </div>
 

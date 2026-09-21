@@ -72,8 +72,9 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       setAccountId(accounts[0]?.id || '');
       
       // Default date to today or within current month
-      const today = new Date().toISOString().split('T')[0];
-      setDate(today.startsWith(currentMonth) ? today : `${currentMonth}-15`);
+      const now = new Date();
+      const localToday = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+      setDate(localToday.startsWith(currentMonth) ? localToday : `${currentMonth}-01`);
       setPaymentMethod('Pix');
       setStatus('paid');
       setNotes('');

@@ -2,13 +2,14 @@ import React, { useState } from 'react';
 import { Account } from '../types';
 import { formatCurrency, generateId } from '../utils/formatters';
 import { CategoryIcon } from './CategoryIcon';
-import { Landmark, Plus, CreditCard, Wallet, ShieldCheck, Edit3 } from 'lucide-react';
+import { Landmark, Plus, CreditCard, Wallet, ShieldCheck, Edit3, Trash2 } from 'lucide-react';
 
 interface AccountsSummaryProps {
   accounts: Account[];
   privacyMode: boolean;
   onAddAccount: (account: Account) => void;
   onUpdateBalance: (accountId: string, newBalance: number) => void;
+  onDeleteAccount: (accountId: string) => void;
 }
 
 export const AccountsSummary: React.FC<AccountsSummaryProps> = ({
@@ -16,6 +17,7 @@ export const AccountsSummary: React.FC<AccountsSummaryProps> = ({
   privacyMode,
   onAddAccount,
   onUpdateBalance,
+  onDeleteAccount,
 }) => {
   const [isAdding, setIsAdding] = useState(false);
   const [name, setName] = useState('');
@@ -25,6 +27,7 @@ export const AccountsSummary: React.FC<AccountsSummaryProps> = ({
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editBalanceVal, setEditBalanceVal] = useState('');
+  const [accountToDelete, setAccountToDelete] = useState<Account | null>(null);
 
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
@@ -131,70 +134,134 @@ export const AccountsSummary: React.FC<AccountsSummaryProps> = ({
         </form>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-        {accounts.map(acc => {
-          const isEditing = editingId === acc.id;
-
-          return (
-            <div
-              key={acc.id}
-              className="p-3.5 rounded-xl border border-zinc-800 bg-zinc-850/60 hover:bg-zinc-800/80 hover:border-zinc-700 transition-all flex flex-col justify-between"
-            >
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <span
-                    className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs"
-                    style={{ backgroundColor: acc.color }}
-                  >
-                    <CategoryIcon name={acc.iconName} className="w-3.5 h-3.5" />
-                  </span>
-                  <button
-                    onClick={() => {
-                      setEditingId(acc.id);
-                      setEditBalanceVal(acc.balance.toString());
-                    }}
-                    className="text-zinc-500 hover:text-lime-400 transition-colors cursor-pointer"
-                    title="Ajustar saldo"
-                  >
-                    <Edit3 className="w-3 h-3" />
-                  </button>
-                </div>
-                <h4 className="font-semibold text-white text-xs truncate">{acc.name}</h4>
-                <p className="text-[10px] text-zinc-400 truncate">{acc.institution}</p>
+      {/* Modal de Confirmação de Exclusão */}
+      {accountToDelete && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-zinc-900 border border-zinc-700 rounded-2xl p-5 max-w-sm w-full shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-rose-500/10 text-rose-400 border border-rose-500/20 flex items-center justify-center shrink-0">
+                <Trash2 className="w-5 h-5" />
               </div>
-
-              <div className="mt-3 pt-2 border-t border-zinc-800">
-                {isEditing ? (
-                  <div className="flex items-center gap-1">
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={editBalanceVal}
-                      onChange={e => setEditBalanceVal(e.target.value)}
-                      className="w-20 px-1.5 py-0.5 text-xs bg-zinc-900 text-white border border-lime-400 rounded-md focus:outline-hidden"
-                      autoFocus
-                    />
-                    <button
-                      onClick={() => handleSaveBalance(acc.id)}
-                      className="px-1.5 py-0.5 bg-lime-400 text-zinc-950 text-[10px] font-bold rounded-md cursor-pointer"
-                    >
-                      OK
-                    </button>
-                  </div>
-                ) : (
-                  <span
-                    className={`font-bold text-xs tracking-tight ${
-                      acc.balance < 0 ? 'text-rose-400' : 'text-white'
-                    }`}
-                  >
-                    {formatCurrency(acc.balance, privacyMode)}
-                  </span>
-                )}
+              <div>
+                <h4 className="font-bold text-white text-sm">Excluir Conta Bancária</h4>
+                <p className="text-xs text-zinc-400">Tem certeza que deseja remover este banco?</p>
               </div>
             </div>
-          );
-        })}
-      </div>
+
+            <div className="p-3 bg-zinc-850 border border-zinc-800 rounded-xl text-xs flex items-center justify-between">
+              <div>
+                <div className="font-semibold text-white">{accountToDelete.name}</div>
+                <div className="text-zinc-400 text-[11px]">{accountToDelete.institution}</div>
+              </div>
+              <span className="font-bold text-xs text-white">
+                {formatCurrency(accountToDelete.balance, privacyMode)}
+              </span>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setAccountToDelete(null)}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onDeleteAccount(accountToDelete.id);
+                  setAccountToDelete(null);
+                }}
+                className="px-3.5 py-1.5 rounded-lg text-xs font-bold bg-rose-600 hover:bg-rose-500 text-white transition-colors cursor-pointer shadow-md shadow-rose-600/20"
+              >
+                Excluir Conta
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {accounts.length === 0 ? (
+        <div className="text-center py-8 border border-dashed border-zinc-800 rounded-xl">
+          <Landmark className="w-8 h-8 text-zinc-600 mx-auto mb-2" />
+          <p className="text-xs text-zinc-400 font-semibold">Nenhuma conta cadastrada</p>
+          <p className="text-[11px] text-zinc-500 mt-0.5">Clique em "Nova Conta" acima para adicionar um banco ou carteira.</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+          {accounts.map(acc => {
+            const isEditing = editingId === acc.id;
+
+            return (
+              <div
+                key={acc.id}
+                className="p-3.5 rounded-xl border border-zinc-800 bg-zinc-850/60 hover:bg-zinc-800/80 hover:border-zinc-700 transition-all flex flex-col justify-between"
+              >
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span
+                      className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs"
+                      style={{ backgroundColor: acc.color }}
+                    >
+                      <CategoryIcon name={acc.iconName} className="w-3.5 h-3.5" />
+                    </span>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => {
+                          setEditingId(acc.id);
+                          setEditBalanceVal(acc.balance.toString());
+                        }}
+                        className="p-1 rounded-md text-zinc-500 hover:text-lime-400 hover:bg-zinc-800 transition-colors cursor-pointer"
+                        title="Ajustar saldo"
+                      >
+                        <Edit3 className="w-3 h-3" />
+                      </button>
+                      <button
+                        onClick={() => setAccountToDelete(acc)}
+                        className="p-1 rounded-md text-zinc-500 hover:text-rose-400 hover:bg-zinc-800 transition-colors cursor-pointer"
+                        title={`Excluir conta ${acc.name}`}
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
+                  <h4 className="font-semibold text-white text-xs truncate">{acc.name}</h4>
+                  <p className="text-[10px] text-zinc-400 truncate">{acc.institution}</p>
+                </div>
+
+                <div className="mt-3 pt-2 border-t border-zinc-800">
+                  {isEditing ? (
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={editBalanceVal}
+                        onChange={e => setEditBalanceVal(e.target.value)}
+                        className="w-20 px-1.5 py-0.5 text-xs bg-zinc-900 text-white border border-lime-400 rounded-md focus:outline-hidden"
+                        autoFocus
+                      />
+                      <button
+                        onClick={() => handleSaveBalance(acc.id)}
+                        className="px-1.5 py-0.5 bg-lime-400 text-zinc-950 text-[10px] font-bold rounded-md cursor-pointer"
+                      >
+                        OK
+                      </button>
+                    </div>
+                  ) : (
+                    <span
+                      className={`font-bold text-xs tracking-tight ${
+                        acc.balance < 0 ? 'text-rose-400' : 'text-white'
+                      }`}
+                    >
+                      {formatCurrency(acc.balance, privacyMode)}
+                    </span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 };

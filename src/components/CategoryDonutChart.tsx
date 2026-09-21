@@ -57,13 +57,13 @@ export const CategoryDonutChart: React.FC<CategoryDonutChartProps> = ({
   // Se não houver despesas
   if (catData.length === 0) {
     return (
-      <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs flex flex-col items-center justify-center text-center h-full min-h-[320px]">
-        <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 mb-3">
-          <PieChart className="w-6 h-6" />
+      <div className="bg-zinc-900 rounded-2xl p-5 border border-zinc-800 shadow-md flex flex-col items-center justify-center text-center h-full min-h-[320px]">
+        <div className="w-12 h-12 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-400 mb-3 border border-zinc-700">
+          <PieChart className="w-6 h-6 text-lime-400" />
         </div>
-        <h4 className="font-semibold text-slate-800 text-sm">Sem despesas registradas</h4>
-        <p className="text-xs text-slate-500 max-w-xs mt-1">
-          Nenhuma despesa foi lançada para o mês selecionado. Adicione novas transações para visualizar o gráfico.
+        <h4 className="font-semibold text-white text-sm">Sem despesas registradas</h4>
+        <p className="text-xs text-zinc-400 max-w-xs mt-1">
+          Nenhuma despesa foi lançada para o mês selecionado. Adicione novos lançamentos para visualizar o gráfico.
         </p>
       </div>
     );

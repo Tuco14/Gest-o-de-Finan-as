@@ -14,6 +14,7 @@ import {
   Calendar
 } from 'lucide-react';
 import { formatMonthYear } from '../utils/formatters';
+import { PWAInstallButton } from './PWAInstallButton';
 
 interface HeaderProps {
   currentMonth: string; // YYYY-MM
@@ -142,6 +143,9 @@ export const Header: React.FC<HeaderProps> = ({
               <Download className="w-4 h-4 text-zinc-400" />
               <span>Exportar</span>
             </button>
+
+            {/* PWA In-App Install Button */}
+            <PWAInstallButton />
 
             {/* Nova Transação CTA: Verde Limão Amarelado */}
             <button
