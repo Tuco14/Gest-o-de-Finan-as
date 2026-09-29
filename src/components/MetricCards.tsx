@@ -2,7 +2,7 @@ import React from 'react';
 import { 
   TrendingUp, 
   TrendingDown, 
-  Wallet, 
+  Landmark, 
   PiggyBank, 
   ArrowUpRight, 
   ArrowDownRight, 
@@ -12,6 +12,7 @@ import { formatCurrency } from '../utils/formatters';
 
 interface MetricCardsProps {
   totalBalance: number;
+  bankAccountName?: string;
   totalIncome: number;
   pendingIncome: number;
   totalExpense: number;
@@ -23,6 +24,7 @@ interface MetricCardsProps {
 
 export const MetricCards: React.FC<MetricCardsProps> = ({
   totalBalance,
+  bankAccountName,
   totalIncome,
   pendingIncome,
   totalExpense,
@@ -36,15 +38,23 @@ export const MetricCards: React.FC<MetricCardsProps> = ({
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-      {/* Saldo Total */}
+      {/* Saldo da Conta Bancária */}
       <div 
         id="card-total-balance"
         className="bg-zinc-900 rounded-2xl p-5 border border-zinc-800 shadow-md hover:border-zinc-700 transition-all flex flex-col justify-between"
       >
         <div className="flex items-center justify-between mb-3">
-          <span className="text-xs font-semibold text-zinc-400 tracking-wide uppercase">Saldo Disponível</span>
+          <div className="flex flex-col">
+            <span className="text-xs font-semibold text-zinc-400 tracking-wide uppercase">Saldo Disponível</span>
+            <span 
+              className="text-[11px] text-lime-400 font-medium truncate max-w-[170px]" 
+              title={bankAccountName ? `Conta Bancária: ${bankAccountName}` : 'Conta do Banco'}
+            >
+              {bankAccountName ? `Banco: ${bankAccountName}` : 'Conta do Banco'}
+            </span>
+          </div>
           <div className="w-8 h-8 rounded-xl bg-zinc-800 border border-zinc-700/80 flex items-center justify-center text-lime-400">
-            <Wallet className="w-4 h-4" />
+            <Landmark className="w-4 h-4" />
           </div>
         </div>
         <div>

@@ -227,6 +227,34 @@ export const AccountsSummary: React.FC<AccountsSummaryProps> = ({
                   </div>
                   <h4 className="font-semibold text-white text-xs truncate">{acc.name}</h4>
                   <p className="text-[10px] text-zinc-400 truncate">{acc.institution}</p>
+                  
+                  <div className="mt-1.5 flex items-center gap-1">
+                    {acc.type === 'checking' && (
+                      <span className="text-[9px] font-bold text-lime-400 bg-lime-400/10 px-1.5 py-0.5 rounded border border-lime-400/20">
+                        Conta do Banco
+                      </span>
+                    )}
+                    {acc.type === 'cash' && (
+                      <span className="text-[9px] font-medium text-zinc-400 bg-zinc-800 px-1.5 py-0.5 rounded">
+                        Carteira Física
+                      </span>
+                    )}
+                    {acc.type === 'credit' && (
+                      <span className="text-[9px] font-medium text-indigo-400 bg-indigo-500/10 px-1.5 py-0.5 rounded border border-indigo-500/20">
+                        Cartão de Crédito
+                      </span>
+                    )}
+                    {acc.type === 'savings' && (
+                      <span className="text-[9px] font-medium text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
+                        Poupança / Reserva
+                      </span>
+                    )}
+                    {acc.type === 'investment' && (
+                      <span className="text-[9px] font-medium text-teal-400 bg-teal-500/10 px-1.5 py-0.5 rounded border border-teal-500/20">
+                        Investimento
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 <div className="mt-3 pt-2 border-t border-zinc-800">

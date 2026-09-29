@@ -344,11 +344,28 @@ export default function App() {
       }
     });
 
-    // Saldo consolidado das contas
-    const totalBalance = accounts.reduce((acc, a) => acc + a.balance, 0);
+    // Saldo da conta do banco (apenas contas bancárias do tipo 'checking')
+    const bankAccounts = accounts.filter(a => a.type === 'checking');
+    
+    // Se houver contas do tipo 'checking', puxa estritamente delas
+    // Caso contrário, busca contas que não sejam carteira física ('cash') e nem cartão de crédito ('credit')
+    const targetAccounts = bankAccounts.length > 0 
+      ? bankAccounts 
+      : accounts.filter(a => a.type !== 'credit' && a.type !== 'cash');
+
+    const totalBalance = targetAccounts.length > 0 
+      ? targetAccounts.reduce((sum, a) => sum + a.balance, 0)
+      : (accounts.length > 0 ? accounts[0].balance : 0);
+
+    const bankAccountName = targetAccounts.length === 1 
+      ? targetAccounts[0].name 
+      : targetAccounts.length > 1 
+      ? `${targetAccounts.length} contas bancárias` 
+      : undefined;
 
     return {
       totalBalance,
+      bankAccountName,
       totalIncome,
       pendingIncome,
       totalExpense,
@@ -752,6 +769,7 @@ export default function App() {
         {/* Cards de Métricas Principais (Sempre visíveis no topo) */}
         <MetricCards
           totalBalance={monthlyMetrics.totalBalance}
+          bankAccountName={monthlyMetrics.bankAccountName}
           totalIncome={monthlyMetrics.totalIncome}
           pendingIncome={monthlyMetrics.pendingIncome}
           totalExpense={monthlyMetrics.totalExpense}
