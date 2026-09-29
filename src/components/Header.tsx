@@ -15,7 +15,8 @@ import {
   Cloud,
   CheckCircle2,
   User as UserIcon,
-  FileText
+  FileText,
+  ShieldCheck
 } from 'lucide-react';
 import { formatMonthYear } from '../utils/formatters';
 import type { User as FirebaseUser } from '../lib/firebase';
@@ -32,6 +33,7 @@ interface HeaderProps {
   onOpenMonthlyReport: () => void;
   transactionsCount: number;
   user: FirebaseUser | null;
+  localUser?: { name: string; email: string } | null;
   onOpenAuth: () => void;
   isSyncing?: boolean;
 }
@@ -47,6 +49,7 @@ export const Header: React.FC<HeaderProps> = ({
   onExportCSV,
   onOpenMonthlyReport,
   user,
+  localUser,
   onOpenAuth,
   isSyncing,
 }) => {
@@ -141,11 +144,15 @@ export const Header: React.FC<HeaderProps> = ({
               className={`flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-xl border transition-all cursor-pointer ${
                 user
                   ? 'bg-lime-400/10 text-lime-400 border-lime-400/30 hover:bg-lime-400/20'
+                  : localUser
+                  ? 'bg-zinc-850 text-lime-400 border-lime-400/30 hover:bg-zinc-800'
                   : 'bg-zinc-800 text-zinc-300 border-zinc-700 hover:text-white hover:bg-zinc-750'
               }`}
               title={
                 user
                   ? `Conectado como ${user.email}. Clique para gerenciar conta.`
+                  : localUser
+                  ? `Perfil Local: ${localUser.name}. Clique para sincronizar na nuvem.`
                   : 'Entrar na conta para sincronizar dados em outros computadores e navegadores'
               }
             >
@@ -156,6 +163,12 @@ export const Header: React.FC<HeaderProps> = ({
                     {isSyncing ? 'Sincronizando...' : 'Nuvem Conectada'}
                   </span>
                   <span className="sm:hidden">Nuvem</span>
+                </>
+              ) : localUser ? (
+                <>
+                  <ShieldCheck className="w-4 h-4 text-lime-400 shrink-0" />
+                  <span className="hidden sm:inline">{localUser.name}</span>
+                  <span className="sm:hidden">Local</span>
                 </>
               ) : (
                 <>

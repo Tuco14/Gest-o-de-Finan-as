@@ -36,6 +36,7 @@ import {
   auth, 
   db, 
   onAuthStateChanged, 
+  getRedirectResult,
   collection, 
   doc, 
   setDoc, 
@@ -118,12 +119,40 @@ export default function App() {
 
   // Autenticação e Nuvem
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
+  const [localUser, setLocalUser] = useState<{ name: string; email: string } | null>(() => {
+    const saved = localStorage.getItem('fincontrol_local_user');
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) { console.error(e); }
+    }
+    return null;
+  });
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [isReportModalOpen, setIsReportModalOpen] = useState<boolean>(false);
 
-  // Monitorar estado de autenticação
+  const handleSaveLocalUser = (name: string, email: string) => {
+    const userObj = { name, email };
+    setLocalUser(userObj);
+    localStorage.setItem('fincontrol_local_user', JSON.stringify(userObj));
+  };
+
+  const handleClearLocalUser = () => {
+    setLocalUser(null);
+    localStorage.removeItem('fincontrol_local_user');
+  };
+
+  // Monitorar estado de autenticação e retorno de redirecionamento do Google
   useEffect(() => {
+    getRedirectResult(auth)
+      .then(result => {
+        if (result?.user) {
+          showToast(`Conectado como ${result.user.displayName || result.user.email}!`);
+        }
+      })
+      .catch(err => {
+        console.warn('Redirect auth check:', err);
+      });
+
     const unsubscribe = onAuthStateChanged(auth, user => {
       setCurrentUser(user);
     });
@@ -713,6 +742,7 @@ export default function App() {
         onOpenMonthlyReport={() => setIsReportModalOpen(true)}
         transactionsCount={transactions.length}
         user={currentUser}
+        localUser={localUser}
         onOpenAuth={() => setIsAuthModalOpen(true)}
         isSyncing={isSyncing}
       />
@@ -889,6 +919,9 @@ export default function App() {
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
         user={currentUser}
+        localUser={localUser}
+        onSaveLocalUser={handleSaveLocalUser}
+        onClearLocalUser={handleClearLocalUser}
         onSuccessToast={showToast}
       />
 
@@ -901,7 +934,7 @@ export default function App() {
         accounts={accounts}
         categories={categories}
         goals={goals}
-        userEmail={currentUser?.email}
+        userEmail={currentUser?.email || localUser?.email}
         onToast={showToast}
       />
     </div>
