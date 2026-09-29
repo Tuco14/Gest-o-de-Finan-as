@@ -4,18 +4,12 @@ import {
   signInWithPopup, 
   signInWithRedirect,
   googleProvider, 
-  signInWithEmailAndPassword, 
-  createUserWithEmailAndPassword, 
   signOut, 
   auth 
 } from '../lib/firebase';
 import { 
-  LogIn, 
   LogOut, 
   Cloud, 
-  User as UserIcon, 
-  Mail, 
-  Lock, 
   AlertCircle, 
   X, 
   ChevronDown, 
@@ -26,8 +20,8 @@ import {
   ExternalLink, 
   ShieldCheck, 
   ArrowRight,
-  RefreshCw,
-  Globe
+  Globe,
+  CheckCircle2
 } from 'lucide-react';
 
 interface AuthModalProps {
@@ -57,15 +51,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   onClearLocalUser,
   onSuccessToast,
 }) => {
-  const [isRegistering, setIsRegistering] = useState(false);
   const [isLocalModeOpen, setIsLocalModeOpen] = useState(false);
   const [localName, setLocalName] = useState(localUser?.name || 'Administrador');
   const [localEmail, setLocalEmail] = useState(localUser?.email || '');
 
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [showConsoleSteps, setShowConsoleSteps] = useState(false);
   const [copiedDomain, setCopiedDomain] = useState(false);
 
   // Estados de erro detalhados
@@ -103,7 +93,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
       if (code === 'auth/operation-not-allowed' || msg.includes('operation-not-allowed')) {
         setErrorType('OPERATION_NOT_ALLOWED');
-        setErrorMessage('O provedor de login Google ainda não está ativado no Firebase Console.');
+        setErrorMessage('O provedor de login Google precisa ser ativado no Firebase Console.');
       } else if (code === 'auth/unauthorized-domain' || msg.includes('unauthorized-domain')) {
         setErrorType('UNAUTHORIZED_DOMAIN');
         setErrorMessage(`O domínio "${currentHostname}" não está autorizado no Firebase Authentication.`);
@@ -142,61 +132,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
   };
 
-  const handleEmailAuth = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!email || !password) {
-      setErrorType('GENERIC');
-      setErrorMessage('Por favor, informe e-mail e senha.');
-      return;
-    }
-
-    setErrorType(null);
-    setErrorMessage(null);
-    setRawErrorCode(null);
-    setLoading(true);
-
-    try {
-      if (isRegistering) {
-        await createUserWithEmailAndPassword(auth, email, password);
-        onSuccessToast('Conta criada com sucesso! Dados sincronizados na nuvem.');
-      } else {
-        await signInWithEmailAndPassword(auth, email, password);
-        onSuccessToast('Login realizado com sucesso! Seus dados foram carregados.');
-      }
-      onClose();
-    } catch (err: any) {
-      console.error('Erro na autenticação por email:', err);
-      const code = err?.code || '';
-      const msg = err?.message || '';
-      setRawErrorCode(code);
-
-      if (code === 'auth/operation-not-allowed' || msg.includes('operation-not-allowed')) {
-        setErrorType('OPERATION_NOT_ALLOWED');
-        setErrorMessage('O método de autenticação por E-mail/Senha precisa ser ativado no Firebase Console.');
-      } else if (code === 'auth/invalid-credential' || code === 'auth/wrong-password' || code === 'auth/user-not-found') {
-        setErrorType('GENERIC');
-        setErrorMessage('E-mail ou senha incorretos.');
-      } else if (code === 'auth/email-already-in-use') {
-        setErrorType('GENERIC');
-        setErrorMessage('Este e-mail já está cadastrado. Alterne para a opção "Entrar" abaixo.');
-      } else if (code === 'auth/weak-password') {
-        setErrorType('GENERIC');
-        setErrorMessage('A senha deve ter pelo menos 6 caracteres.');
-      } else if (code === 'auth/invalid-email') {
-        setErrorType('GENERIC');
-        setErrorMessage('Por favor insira um formato de e-mail válido.');
-      } else if (code === 'auth/unauthorized-domain' || msg.includes('unauthorized-domain')) {
-        setErrorType('UNAUTHORIZED_DOMAIN');
-        setErrorMessage(`O domínio "${currentHostname}" não está autorizado no Firebase Authentication.`);
-      } else {
-        setErrorType('GENERIC');
-        setErrorMessage(msg || 'Erro ao autenticar.');
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleLogout = async () => {
     try {
       await signOut(auth);
@@ -221,7 +156,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs animate-in fade-in duration-200">
-      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-lg p-6 shadow-2xl relative max-h-[92vh] overflow-y-auto">
+      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-md p-6 shadow-2xl relative max-h-[92vh] overflow-y-auto">
         <button
           onClick={onClose}
           className="absolute top-4 right-4 text-zinc-400 hover:text-white p-1 rounded-lg hover:bg-zinc-800 cursor-pointer transition-colors"
@@ -231,7 +166,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         </button>
 
         {user ? (
-          /* Usuário Conectado ao Firebase */
+          /* Usuário Conectado ao Google / Firebase */
           <div className="space-y-5 text-center">
             <div className="w-14 h-14 bg-lime-400/20 text-lime-400 rounded-full flex items-center justify-center mx-auto ring-4 ring-lime-400/10">
               <Cloud className="w-7 h-7" />
@@ -240,7 +175,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             <div>
               <h2 className="text-lg font-bold text-white">Sincronização em Nuvem Ativa</h2>
               <p className="text-xs text-zinc-400 mt-1">
-                Conectado como <strong className="text-zinc-200">{user.email || 'Usuário Google'}</strong>
+                Conectado com conta Google: <br />
+                <strong className="text-zinc-200 font-medium">{user.email || 'Conta Google'}</strong>
               </p>
             </div>
 
@@ -250,7 +186,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 <span>Firestore em Tempo Real Conectado</span>
               </div>
               <p>
-                Todas as suas transações, categorias, contas e metas estão sendo salvas automaticamente no banco de dados na nuvem.
+                Todas as suas transações, categorias, contas e metas estão sendo salvas automaticamente no banco de dados na nuvem e sincronizadas entre seus dispositivos.
               </p>
             </div>
 
@@ -259,22 +195,22 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               className="w-full py-2.5 px-4 rounded-xl border border-rose-500/30 text-rose-400 hover:bg-rose-500/10 text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer"
             >
               <LogOut className="w-4 h-4" />
-              <span>Desconectar desta Conta</span>
+              <span>Desconectar Conta Google</span>
             </button>
           </div>
         ) : (
-          /* Não Conectado: Formulário com Diagnósticos e Alternativas */
-          <div className="space-y-4">
+          /* Não Conectado: Foco Exclusivo no Login com Google */
+          <div className="space-y-5">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-lime-400/20 text-lime-400 flex items-center justify-center shrink-0">
                 <Cloud className="w-5 h-5" />
               </div>
               <div>
                 <h2 className="text-base font-bold text-white">
-                  {isRegistering ? 'Criar Conta na Nuvem' : 'Sincronizar em Nuvem'}
+                  Sincronizar com Google
                 </h2>
                 <p className="text-xs text-zinc-400">
-                  Salve e sincronize suas finanças em qualquer dispositivo ou navegador
+                  Acesse suas finanças em qualquer dispositivo com 1 clique
                 </p>
               </div>
             </div>
@@ -285,24 +221,24 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 <div className="flex items-start gap-2">
                   <AlertCircle className="w-4.5 h-4.5 shrink-0 text-amber-400 mt-0.5" />
                   <div className="space-y-1">
-                    <p className="font-semibold text-white">Provedor precisa ser ativado no Firebase Console</p>
+                    <p className="font-semibold text-white">Google Sign-In precisa ser ativado no Firebase Console</p>
                     <p className="text-[11px] text-zinc-300">
-                      O Firebase desabilita provedores de login por segurança até serem ligados no console do projeto.
+                      O provedor Google precisa estar com status <strong>Ativado</strong> no console do projeto.
                     </p>
                   </div>
                 </div>
 
                 <div className="p-2.5 rounded-lg bg-zinc-950/80 border border-zinc-800 text-[11px] space-y-2">
-                  <p className="font-semibold text-zinc-200">Como ativar em 3 passos:</p>
+                  <p className="font-semibold text-zinc-200">Como ativar no Firebase Console:</p>
                   <ol className="list-decimal list-inside space-y-1 text-zinc-300">
                     <li>
-                      Acesse o <strong className="text-white">Firebase Console</strong> no projeto <code className="text-lime-400 bg-zinc-900 px-1 py-0.5 rounded">{firebaseProjectId}</code>
+                      Acesse o projeto <code className="text-lime-400 bg-zinc-900 px-1 py-0.5 rounded">{firebaseProjectId}</code>
                     </li>
                     <li>
-                      Vá no menu <strong className="text-white">Build &gt; Authentication &gt; Sign-in method</strong>
+                      Abra o menu <strong className="text-white">Build &gt; Authentication &gt; Sign-in method</strong>
                     </li>
                     <li>
-                      Ative o <strong className="text-lime-400">Google</strong> e/ou <strong className="text-lime-400">E-mail/senha</strong> e clique em Salvar
+                      Clique em <strong className="text-lime-400">Google</strong>, marque <strong className="text-white">Ativar</strong> e salve
                     </li>
                   </ol>
                   <a
@@ -311,20 +247,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     rel="noreferrer"
                     className="inline-flex items-center gap-1.5 text-lime-400 hover:text-lime-300 font-semibold pt-1 transition-colors"
                   >
-                    <span>Abrir console do Firebase</span>
+                    <span>Ir para Provedores no Console</span>
                     <ExternalLink className="w-3.5 h-3.5" />
                   </a>
-                </div>
-
-                <div className="pt-1">
-                  <button
-                    type="button"
-                    onClick={() => setIsLocalModeOpen(true)}
-                    className="w-full py-2 px-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 hover:text-white font-medium rounded-lg text-xs flex items-center justify-center gap-2 cursor-pointer transition-colors"
-                  >
-                    <ShieldCheck className="w-4 h-4 text-lime-400" />
-                    <span>Usar Modo Local agora (sem precisar configurar o Firebase)</span>
-                  </button>
                 </div>
               </div>
             )}
@@ -337,7 +262,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   <div className="space-y-1">
                     <p className="font-semibold text-white">Domínio precisa de autorização no Firebase</p>
                     <p className="text-[11px] text-zinc-300">
-                      O Firebase exige que o domínio do site esteja cadastrado na lista de domínios autorizados para permitir o login.
+                      O Firebase exige que o endereço atual esteja listado em Domínios Autorizados.
                     </p>
                   </div>
                 </div>
@@ -357,8 +282,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
                   <p className="font-semibold text-zinc-200">Como adicionar no Firebase:</p>
                   <ol className="list-decimal list-inside space-y-1 text-zinc-300">
-                    <li>Acesse <strong className="text-white">Authentication &gt; Settings (Configurações)</strong></li>
-                    <li>Abra a aba <strong className="text-white">Authorized domains (Domínios autorizados)</strong></li>
+                    <li>Vá em <strong className="text-white">Authentication &gt; Settings &gt; Authorized domains</strong></li>
                     <li>Clique em <strong className="text-white">Add domain</strong> e cole o domínio copiado acima</li>
                   </ol>
                   <a
@@ -371,17 +295,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     <ExternalLink className="w-3.5 h-3.5" />
                   </a>
                 </div>
-
-                <div className="pt-1">
-                  <button
-                    type="button"
-                    onClick={() => setIsLocalModeOpen(true)}
-                    className="w-full py-2 px-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 hover:text-white font-medium rounded-lg text-xs flex items-center justify-center gap-2 cursor-pointer transition-colors"
-                  >
-                    <ShieldCheck className="w-4 h-4 text-lime-400" />
-                    <span>Continuar no Modo Local sem restrições</span>
-                  </button>
-                </div>
               </div>
             )}
 
@@ -391,9 +304,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 <div className="flex items-start gap-2">
                   <AlertCircle className="w-4.5 h-4.5 shrink-0 text-sky-400 mt-0.5" />
                   <div>
-                    <p className="font-semibold text-white">Janela pop-up foi bloqueada ou fechada</p>
+                    <p className="font-semibold text-white">Janela pop-up foi bloqueada pelo navegador</p>
                     <p className="text-[11px] text-zinc-300 mt-0.5">
-                      Navegadores com bloqueadores ou em iframes podem impedir a janela do Google de abrir. Você pode tentar pelo modo de redirecionamento direto sem pop-up.
+                      Para evitar restrições de pop-up ou de iframe, você pode entrar usando o redirecionamento direto abaixo:
                     </p>
                   </div>
                 </div>
@@ -423,106 +336,52 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </div>
             )}
 
-            {/* SEÇÃO PRINCIPAL DE LOGIN: GOOGLE */}
-            <div>
-              <div className="flex items-center justify-between text-[11px] text-zinc-400 mb-1.5 px-0.5">
-                <span className="flex items-center gap-1 font-medium">
-                  <Sparkles className="w-3.5 h-3.5 text-lime-400" />
-                  <span>Acesso com conta Google</span>
-                </span>
-                <span className="text-[10px] font-semibold text-lime-400 bg-lime-400/10 px-2 py-0.5 rounded-full border border-lime-400/20">
-                  Recomendado
-                </span>
+            {/* BENEFÍCIOS DO LOGIN COM GOOGLE */}
+            <div className="bg-zinc-950/60 border border-zinc-800/80 rounded-xl p-3.5 space-y-2 text-xs">
+              <div className="flex items-center gap-2 text-zinc-200 font-semibold text-[11px]">
+                <Sparkles className="w-3.5 h-3.5 text-lime-400" />
+                <span>Vantagens da Sincronização em Nuvem</span>
               </div>
-
-              <div className="space-y-2">
-                <button
-                  id="google-login-btn"
-                  onClick={handleGoogleLogin}
-                  disabled={loading}
-                  className="w-full py-2.5 px-4 bg-white hover:bg-zinc-100 text-zinc-900 font-bold rounded-xl text-xs flex items-center justify-center gap-2.5 transition-all cursor-pointer shadow-sm disabled:opacity-50 active:scale-99"
-                >
-                  <svg className="w-4 h-4" viewBox="0 0 24 24">
-                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
-                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
-                  </svg>
-                  <span>{loading ? 'Conectando...' : 'Continuar com Google'}</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleGoogleRedirectLogin}
-                  disabled={loading}
-                  className="w-full py-1.5 text-[11px] text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer text-center"
-                >
-                  O pop-up não abriu? Clique aqui para login por redirecionamento
-                </button>
-              </div>
+              <ul className="space-y-1.5 text-[11px] text-zinc-400">
+                <li className="flex items-center gap-2">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-lime-400 shrink-0" />
+                  <span>Sincronização instantânea e automática em tempo real</span>
+                </li>
+                <li className="flex items-center gap-2">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-lime-400 shrink-0" />
+                  <span>Acesse seus lançamentos no celular, tablet e computador</span>
+                </li>
+                <li className="flex items-center gap-2">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-lime-400 shrink-0" />
+                  <span>Backup contínuo e protegido com sua conta Google</span>
+                </li>
+              </ul>
             </div>
 
-            <div className="flex items-center gap-3 my-2">
-              <div className="h-px bg-zinc-800 flex-1" />
-              <span className="text-[11px] text-zinc-500 uppercase font-semibold">ou por e-mail</span>
-              <div className="h-px bg-zinc-800 flex-1" />
-            </div>
-
-            {/* FORMULÁRIO DE E-MAIL */}
-            <form onSubmit={handleEmailAuth} className="space-y-3">
-              <div>
-                <label className="block text-[11px] font-semibold text-zinc-400 mb-1">E-mail</label>
-                <div className="relative">
-                  <Mail className="w-4 h-4 text-zinc-500 absolute left-3 top-3" />
-                  <input
-                    type="email"
-                    required
-                    value={email}
-                    onChange={e => setEmail(e.target.value)}
-                    placeholder="seuemail@exemplo.com"
-                    className="w-full bg-zinc-950 border border-zinc-800 focus:border-lime-400 rounded-xl py-2 pl-9 pr-3 text-xs text-white placeholder-zinc-600 outline-hidden transition-colors"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-semibold text-zinc-400 mb-1">Senha</label>
-                <div className="relative">
-                  <Lock className="w-4 h-4 text-zinc-500 absolute left-3 top-3" />
-                  <input
-                    type="password"
-                    required
-                    value={password}
-                    onChange={e => setPassword(e.target.value)}
-                    placeholder="••••••••"
-                    className="w-full bg-zinc-950 border border-zinc-800 focus:border-lime-400 rounded-xl py-2 pl-9 pr-3 text-xs text-white placeholder-zinc-600 outline-hidden transition-colors"
-                  />
-                </div>
-              </div>
-
+            {/* BOTÃO PRINCIPAL DE LOGIN: GOOGLE */}
+            <div className="space-y-2.5">
               <button
-                type="submit"
+                id="google-login-btn"
+                onClick={handleGoogleLogin}
                 disabled={loading}
-                className="w-full py-2.5 px-4 bg-lime-400 hover:bg-lime-300 text-zinc-950 font-bold rounded-xl text-xs transition-all flex items-center justify-center gap-2 cursor-pointer shadow-md shadow-lime-400/20 disabled:opacity-50 active:scale-99"
+                className="w-full py-3 px-4 bg-white hover:bg-zinc-100 text-zinc-900 font-bold rounded-xl text-xs flex items-center justify-center gap-3 transition-all cursor-pointer shadow-md hover:shadow-lg disabled:opacity-50 active:scale-99"
               >
-                <LogIn className="w-4 h-4 stroke-[2.5]" />
-                <span>{isRegistering ? 'Cadastrar e Sincronizar' : 'Entrar com E-mail'}</span>
+                <svg className="w-4.5 h-4.5 shrink-0" viewBox="0 0 24 24">
+                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+                </svg>
+                <span className="text-sm font-semibold">{loading ? 'Conectando ao Google...' : 'Continuar com Google'}</span>
               </button>
-            </form>
 
-            <div className="text-center pt-1">
               <button
                 type="button"
-                onClick={() => {
-                  setIsRegistering(!isRegistering);
-                  setErrorType(null);
-                  setErrorMessage(null);
-                }}
-                className="text-xs text-zinc-400 hover:text-lime-400 transition-colors cursor-pointer"
+                onClick={handleGoogleRedirectLogin}
+                disabled={loading}
+                className="w-full py-1 text-[11px] text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer text-center"
               >
-                {isRegistering
-                  ? 'Já possui uma conta? Faça login aqui'
-                  : 'Não tem conta ainda? Crie gratuitamente'}
+                O pop-up não abriu? Clique para entrar por redirecionamento direto
               </button>
             </div>
 
@@ -535,7 +394,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               >
                 <span className="flex items-center gap-1.5">
                   <ShieldCheck className="w-4 h-4 text-lime-400" />
-                  <span>Quer usar sem nuvem? <strong>Modo Local / Convidado</strong></span>
+                  <span>Prefere usar sem nuvem? <strong>Modo Local</strong></span>
                 </span>
                 {isLocalModeOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
               </button>
@@ -543,7 +402,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               {isLocalModeOpen && (
                 <form onSubmit={handleSaveLocalProfile} className="mt-2.5 p-3.5 bg-zinc-950/70 border border-zinc-800 rounded-xl space-y-2.5">
                   <p className="text-[11px] text-zinc-400">
-                    Seu progresso, contas, lançamentos e metas ficam 100% salvos no armazenamento seguro do seu navegador, sem depender de provedores externos.
+                    Seu progresso, contas, lançamentos e metas ficam 100% salvos no armazenamento local do seu navegador, sem depender de conexões externas.
                   </p>
 
                   <div>
