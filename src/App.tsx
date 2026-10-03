@@ -4,6 +4,7 @@ import {
   Category, 
   Account, 
   FinancialGoal, 
+  PayableBill,
   TransactionType 
 } from './types';
 import { 
@@ -22,6 +23,8 @@ import { BudgetsView } from './components/BudgetsView';
 import { ReportsView } from './components/ReportsView';
 import { AccountsSummary } from './components/AccountsSummary';
 import { UpcomingBills } from './components/UpcomingBills';
+import { BillsView } from './components/BillsView';
+import { ResetConfirmModal } from './components/ResetConfirmModal';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { formatCurrency } from './utils/formatters';
 import { 
@@ -98,6 +101,14 @@ export default function App() {
     return INITIAL_GOALS;
   });
 
+  const [bills, setBills] = useState<PayableBill[]>(() => {
+    const saved = localStorage.getItem('fincontrol_payable_bills');
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) { console.error(e); }
+    }
+    return [];
+  });
+
   // Estado do mês ativo (YYYY-MM atual do sistema)
   const [currentMonth, setCurrentMonth] = useState<string>(() => {
     const now = new Date();
@@ -110,8 +121,9 @@ export default function App() {
     return localStorage.getItem('fincontrol_privacy') === 'true';
   });
 
-  const [activeTab, setActiveTab] = useState<'overview' | 'transactions' | 'budgets' | 'reports'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'transactions' | 'budgets' | 'reports' | 'bills'>('overview');
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isResetModalOpen, setIsResetModalOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [modalInitialType, setModalInitialType] = useState<TransactionType>('expense');
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('');
@@ -288,11 +300,38 @@ export default function App() {
       err => console.error('Erro ao sincronizar metas:', err)
     );
 
+    // Escuta contas a pagar
+    const qBills = query(collection(db, 'payable_bills'), where('userId', '==', uid));
+    const unsubBills = onSnapshot(
+      qBills,
+      snapshot => {
+        const cloudBills: PayableBill[] = [];
+        snapshot.forEach(docSnap => {
+          const data = docSnap.data();
+          cloudBills.push({
+            id: docSnap.id,
+            name: data.name,
+            installmentAmount: Number(data.installmentAmount) || 0,
+            totalInstallments: Number(data.totalInstallments) || 1,
+            paidInstallments: Number(data.paidInstallments) || 0,
+            dueDate: data.dueDate,
+            category: data.category,
+            notes: data.notes,
+            color: data.color,
+            createdAt: data.createdAt,
+          });
+        });
+        setBills(cloudBills);
+      },
+      err => console.error('Erro ao sincronizar contas a pagar:', err)
+    );
+
     return () => {
       unsubTx();
       unsubAcc();
       unsubCat();
       unsubGoals();
+      unsubBills();
     };
   }, [currentUser]);
 
@@ -312,6 +351,10 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('fincontrol_goals', JSON.stringify(goals));
   }, [goals]);
+
+  useEffect(() => {
+    localStorage.setItem('fincontrol_payable_bills', JSON.stringify(bills));
+  }, [bills]);
 
   useEffect(() => {
     localStorage.setItem('fincontrol_privacy', String(privacyMode));
@@ -711,20 +754,156 @@ export default function App() {
     showToast('Relatório CSV baixado com sucesso!');
   };
 
-  // Reset para dados zerados
-  const handleResetData = () => {
-    if (confirm('Atenção: deseja zerar todos os lançamentos, saldos e metas para reiniciar o aplicativo do zero?')) {
-      localStorage.removeItem('fincontrol_transactions');
-      localStorage.removeItem('fincontrol_categories');
-      localStorage.removeItem('fincontrol_accounts');
-      localStorage.removeItem('fincontrol_goals');
-      localStorage.setItem('fincontrol_version', APP_STORAGE_VERSION);
-      setTransactions(INITIAL_TRANSACTIONS);
-      setCategories(INITIAL_CATEGORIES);
-      setAccounts(INITIAL_ACCOUNTS);
-      setGoals(INITIAL_GOALS);
-      showToast('Todos os valores foram zerados! O app está pronto para seu uso.');
+  // Handlers para Contas a Pagar (Bills)
+  const addMonthsToDate = (dateStr: string, monthsToAdd: number): string => {
+    try {
+      const [y, m, d] = dateStr.split('-').map(Number);
+      const date = new Date(y, m - 1 + monthsToAdd, d);
+      const newY = date.getFullYear();
+      const newM = String(date.getMonth() + 1).padStart(2, '0');
+      const newD = String(date.getDate()).padStart(2, '0');
+      return `${newY}-${newM}-${newD}`;
+    } catch {
+      return dateStr;
     }
+  };
+
+  const handleAddBill = async (bill: PayableBill) => {
+    if (currentUser) {
+      try {
+        await setDoc(doc(db, 'payable_bills', bill.id), {
+          ...bill,
+          userId: currentUser.uid,
+        });
+      } catch (err) {
+        console.error('Erro ao salvar conta a pagar no Firestore:', err);
+      }
+    }
+    setBills(prev => [bill, ...prev]);
+    showToast(`Conta "${bill.name}" cadastrada com sucesso!`);
+  };
+
+  const handleUpdateBill = async (bill: PayableBill) => {
+    if (currentUser) {
+      try {
+        await setDoc(doc(db, 'payable_bills', bill.id), {
+          ...bill,
+          userId: currentUser.uid,
+        });
+      } catch (err) {
+        console.error('Erro ao atualizar conta no Firestore:', err);
+      }
+    }
+    setBills(prev => prev.map(b => (b.id === bill.id ? bill : b)));
+    showToast('Conta a pagar atualizada!');
+  };
+
+  const handleDeleteBill = async (id: string) => {
+    const bill = bills.find(b => b.id === id);
+    if (currentUser) {
+      try {
+        await deleteDoc(doc(db, 'payable_bills', id));
+      } catch (err) {
+        console.error('Erro ao excluir conta no Firestore:', err);
+      }
+    }
+    setBills(prev => prev.filter(b => b.id !== id));
+    showToast(`Conta "${bill?.name || 'selecionada'}" excluída`);
+  };
+
+  const handlePayInstallment = async (id: string) => {
+    const bill = bills.find(b => b.id === id);
+    if (!bill) return;
+    if (bill.paidInstallments >= bill.totalInstallments) return;
+
+    const nextPaid = bill.paidInstallments + 1;
+    const nextDueDate = addMonthsToDate(bill.dueDate, 1);
+    const updated: PayableBill = {
+      ...bill,
+      paidInstallments: nextPaid,
+      dueDate: nextDueDate,
+    };
+
+    if (currentUser) {
+      try {
+        await setDoc(doc(db, 'payable_bills', id), {
+          ...updated,
+          userId: currentUser.uid,
+        });
+      } catch (err) {
+        console.error('Erro ao dar baixa em parcela no Firestore:', err);
+      }
+    }
+
+    setBills(prev => prev.map(b => (b.id === id ? updated : b)));
+    showToast(`Parcela ${nextPaid}/${bill.totalInstallments} de "${bill.name}" marcada como paga!`);
+  };
+
+  const handleRevertInstallment = async (id: string) => {
+    const bill = bills.find(b => b.id === id);
+    if (!bill || bill.paidInstallments <= 0) return;
+
+    const prevPaid = bill.paidInstallments - 1;
+    const prevDueDate = addMonthsToDate(bill.dueDate, -1);
+    const updated: PayableBill = {
+      ...bill,
+      paidInstallments: prevPaid,
+      dueDate: prevDueDate,
+    };
+
+    if (currentUser) {
+      try {
+        await setDoc(doc(db, 'payable_bills', id), {
+          ...updated,
+          userId: currentUser.uid,
+        });
+      } catch (err) {
+        console.error('Erro ao reverter parcela no Firestore:', err);
+      }
+    }
+
+    setBills(prev => prev.map(b => (b.id === id ? updated : b)));
+    showToast(`Parcela desfeita para ${prevPaid}/${bill.totalInstallments}`);
+  };
+
+  const handlePayoffBill = async (id: string) => {
+    const bill = bills.find(b => b.id === id);
+    if (!bill) return;
+
+    const updated: PayableBill = {
+      ...bill,
+      paidInstallments: bill.totalInstallments,
+    };
+
+    if (currentUser) {
+      try {
+        await setDoc(doc(db, 'payable_bills', id), {
+          ...updated,
+          userId: currentUser.uid,
+        });
+      } catch (err) {
+        console.error('Erro ao quitar conta no Firestore:', err);
+      }
+    }
+
+    setBills(prev => prev.map(b => (b.id === id ? updated : b)));
+    showToast(`Conta "${bill.name}" quitada integralmente! Parabéns! 🎉`);
+  };
+
+  // Reset para dados zerados (acionado via modal de confirmação)
+  const handleConfirmReset = () => {
+    localStorage.removeItem('fincontrol_transactions');
+    localStorage.removeItem('fincontrol_categories');
+    localStorage.removeItem('fincontrol_accounts');
+    localStorage.removeItem('fincontrol_goals');
+    localStorage.removeItem('fincontrol_payable_bills');
+    localStorage.setItem('fincontrol_version', APP_STORAGE_VERSION);
+    setTransactions(INITIAL_TRANSACTIONS);
+    setCategories(INITIAL_CATEGORIES);
+    setAccounts(INITIAL_ACCOUNTS);
+    setGoals(INITIAL_GOALS);
+    setBills([]);
+    showToast('Todos os valores foram zerados! O app está pronto para seu uso.');
   };
 
   // Redirecionamento da categoria para a aba de transações
@@ -876,6 +1055,23 @@ export default function App() {
             />
           </div>
         )}
+
+        {activeTab === 'bills' && (
+          <div className="animate-in fade-in duration-200">
+            <BillsView
+              bills={bills}
+              categories={categories}
+              privacyMode={privacyMode}
+              currentMonth={currentMonth}
+              onAddBill={handleAddBill}
+              onUpdateBill={handleUpdateBill}
+              onDeleteBill={handleDeleteBill}
+              onPayInstallment={handlePayInstallment}
+              onRevertInstallment={handleRevertInstallment}
+              onPayoffBill={handlePayoffBill}
+            />
+          </div>
+        )}
       </main>
 
       {/* Footer Minimalista */}
@@ -904,7 +1100,7 @@ export default function App() {
               <span>Exportar Dados</span>
             </button>
             <button
-              onClick={handleResetData}
+              onClick={() => setIsResetModalOpen(true)}
               className="hover:text-rose-400 transition-colors flex items-center gap-1 cursor-pointer"
               title="Zerar todos os lançamentos e valores do aplicativo"
             >
@@ -954,6 +1150,13 @@ export default function App() {
         goals={goals}
         userEmail={currentUser?.email || localUser?.email}
         onToast={showToast}
+      />
+
+      {/* Pop-up de Confirmação para Zerar Dados */}
+      <ResetConfirmModal
+        isOpen={isResetModalOpen}
+        onClose={() => setIsResetModalOpen(false)}
+        onConfirm={handleConfirmReset}
       />
     </div>
   );

@@ -53,6 +53,19 @@
         "category": { "type": "string" },
         "color": { "type": "string" }
       }
+    },
+    "PayableBill": {
+      "fields": {
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "installmentAmount": { "type": "number" },
+        "totalInstallments": { "type": "number" },
+        "paidInstallments": { "type": "number" },
+        "dueDate": { "type": "string" },
+        "category": { "type": "string" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string" }
+      }
     }
   },
   "rules": {
@@ -60,6 +73,7 @@
     "transactions": "request.auth != null && (resource == null || resource.data.userId == request.auth.uid) && request.resource.data.userId == request.auth.uid",
     "accounts": "request.auth != null && (resource == null || resource.data.userId == request.auth.uid) && request.resource.data.userId == request.auth.uid",
     "categories": "request.auth != null && (resource == null || resource.data.userId == request.auth.uid) && request.resource.data.userId == request.auth.uid",
-    "goals": "request.auth != null && (resource == null || resource.data.userId == request.auth.uid) && request.resource.data.userId == request.auth.uid"
+    "goals": "request.auth != null && (resource == null || resource.data.userId == request.auth.uid) && request.resource.data.userId == request.auth.uid",
+    "payable_bills": "request.auth != null && (resource == null || resource.data.userId == request.auth.uid) && request.resource.data.userId == request.auth.uid"
   }
 }

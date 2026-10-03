@@ -16,7 +16,8 @@ import {
   CheckCircle2,
   User as UserIcon,
   FileText,
-  ShieldCheck
+  ShieldCheck,
+  Receipt
 } from 'lucide-react';
 import { formatMonthYear } from '../utils/formatters';
 import type { User as FirebaseUser } from '../lib/firebase';
@@ -26,8 +27,8 @@ interface HeaderProps {
   setCurrentMonth: (month: string) => void;
   privacyMode: boolean;
   setPrivacyMode: (val: boolean) => void;
-  activeTab: 'overview' | 'transactions' | 'budgets' | 'reports';
-  setActiveTab: (tab: 'overview' | 'transactions' | 'budgets' | 'reports') => void;
+  activeTab: 'overview' | 'transactions' | 'budgets' | 'reports' | 'bills';
+  setActiveTab: (tab: 'overview' | 'transactions' | 'budgets' | 'reports' | 'bills') => void;
   onOpenNewTransaction: (type?: 'income' | 'expense') => void;
   onExportCSV: () => void;
   onOpenMonthlyReport: () => void;
@@ -280,6 +281,19 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <BarChart3 className="w-4 h-4" />
             <span>Relatórios & Análise</span>
+          </button>
+
+          <button
+            id="tab-bills"
+            onClick={() => setActiveTab('bills')}
+            className={`flex items-center gap-2 py-3 px-3 text-xs sm:text-sm font-medium border-b-2 transition-all cursor-pointer whitespace-nowrap ${
+              activeTab === 'bills'
+                ? 'border-lime-400 text-lime-400 font-bold'
+                : 'border-transparent text-zinc-400 hover:text-zinc-200 hover:border-zinc-700'
+            }`}
+          >
+            <Receipt className="w-4 h-4" />
+            <span>Contas a Pagar</span>
           </button>
         </nav>
       </div>

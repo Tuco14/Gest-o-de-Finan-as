@@ -45,6 +45,19 @@ export interface FinancialGoal {
   color: string;
 }
 
+export interface PayableBill {
+  id: string;
+  name: string;
+  category?: string;
+  totalInstallments: number;
+  paidInstallments: number;
+  installmentAmount: number;
+  dueDate: string; // YYYY-MM-DD
+  notes?: string;
+  color?: string;
+  createdAt?: string;
+}
+
 export interface FilterOptions {
   search: string;
   type: 'all' | TransactionType;

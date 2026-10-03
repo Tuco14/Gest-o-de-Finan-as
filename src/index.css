@@ -15,6 +15,16 @@
     text-rendering: optimizeLegibility;
     background-color: #09090b;
     color: #f4f4f5;
+    cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Cpath d='M3 3 L3 19 L7.5 15 L11.5 23 L14.5 21.5 L10.5 13.5 L16 13.5 Z' fill='%23000000' opacity='0.35'/%3E%3Cpath d='M2 2 L2 18 L6.5 14 L10.5 22 L13.5 20.5 L9.5 12.5 L15 12.5 Z' fill='%23a3e635' stroke='%2309090b' stroke-width='1.5' stroke-linejoin='round'/%3E%3C/svg%3E") 2 2, default;
+  }
+
+  /* Custom Mouse Cursor - Apenas o ponteiro normal em verde, sem mãozinha */
+  *, button, a, select, input[type="button"], input[type="submit"], [role="button"], .cursor-pointer {
+    cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Cpath d='M3 3 L3 19 L7.5 15 L11.5 23 L14.5 21.5 L10.5 13.5 L16 13.5 Z' fill='%23000000' opacity='0.35'/%3E%3Cpath d='M2 2 L2 18 L6.5 14 L10.5 22 L13.5 20.5 L9.5 12.5 L15 12.5 Z' fill='%23a3e635' stroke='%2309090b' stroke-width='1.5' stroke-linejoin='round'/%3E%3C/svg%3E") 2 2, default !important;
+  }
+
+  input[type="text"], input[type="number"], input[type="password"], input[type="email"], textarea {
+    cursor: text !important;
   }
 
   /* Custom dark scrollbar */
