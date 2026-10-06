@@ -56,6 +56,9 @@ export interface PayableBill {
   notes?: string;
   color?: string;
   createdAt?: string;
+  billType?: 'installment' | 'fixed'; // 'fixed' = conta fixa recorrente (água, luz, celular, etc.), 'installment' = parcelamento/financiamento
+  lastPaidMonth?: string; // YYYY-MM do mês em que foi paga pela última vez
+  iconName?: string; // Droplets, Zap, Smartphone, Wifi, Home, Tv, etc.
 }
 
 export interface FilterOptions {

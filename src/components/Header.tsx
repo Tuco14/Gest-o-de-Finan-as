@@ -30,6 +30,7 @@ interface HeaderProps {
   activeTab: 'overview' | 'transactions' | 'budgets' | 'reports' | 'bills';
   setActiveTab: (tab: 'overview' | 'transactions' | 'budgets' | 'reports' | 'bills') => void;
   onOpenNewTransaction: (type?: 'income' | 'expense') => void;
+  onOpenNewBill?: () => void;
   onExportCSV: () => void;
   onOpenMonthlyReport: () => void;
   transactionsCount: number;
@@ -47,6 +48,7 @@ export const Header: React.FC<HeaderProps> = ({
   activeTab,
   setActiveTab,
   onOpenNewTransaction,
+  onOpenNewBill,
   onExportCSV,
   onOpenMonthlyReport,
   user,
@@ -214,15 +216,25 @@ export const Header: React.FC<HeaderProps> = ({
               <span>CSV</span>
             </button>
 
-            {/* Nova Transação CTA: Verde Limão Amarelado */}
+            {/* Nova Transação / Nova Conta CTA */}
             <button
               id="new-transaction-btn"
-              onClick={() => onOpenNewTransaction()}
+              onClick={() => {
+                if (activeTab === 'bills' && onOpenNewBill) {
+                  onOpenNewBill();
+                } else {
+                  onOpenNewTransaction();
+                }
+              }}
               className="flex items-center gap-1.5 px-4 py-2 bg-lime-400 hover:bg-lime-300 text-zinc-950 text-xs font-bold rounded-xl shadow-md shadow-lime-400/20 hover:shadow-lime-400/30 transition-all cursor-pointer active:scale-98"
             >
               <Plus className="w-4 h-4 stroke-[2.5]" />
-              <span className="hidden sm:inline">Nova Transação</span>
-              <span className="sm:hidden">Novo</span>
+              <span className="hidden sm:inline">
+                {activeTab === 'bills' ? 'Nova Conta a Pagar' : 'Nova Transação'}
+              </span>
+              <span className="sm:hidden">
+                {activeTab === 'bills' ? 'Nova Conta' : 'Novo'}
+              </span>
             </button>
           </div>
         </div>

@@ -104,7 +104,21 @@ export default function App() {
   const [bills, setBills] = useState<PayableBill[]>(() => {
     const saved = localStorage.getItem('fincontrol_payable_bills');
     if (saved) {
-      try { return JSON.parse(saved); } catch (e) { console.error(e); }
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          // Deduplica por ID para limpar quaisquer duplicatas pré-existentes
+          const map = new Map<string, PayableBill>();
+          parsed.forEach((b: PayableBill) => {
+            if (b && b.id && !map.has(b.id)) {
+              map.set(b.id, b);
+            }
+          });
+          return Array.from(map.values());
+        }
+      } catch (e) {
+        console.error(e);
+      }
     }
     return [];
   });
@@ -123,6 +137,7 @@ export default function App() {
 
   const [activeTab, setActiveTab] = useState<'overview' | 'transactions' | 'budgets' | 'reports' | 'bills'>('overview');
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isCreateBillModalOpen, setIsCreateBillModalOpen] = useState(false);
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [modalInitialType, setModalInitialType] = useState<TransactionType>('expense');
@@ -312,16 +327,55 @@ export default function App() {
             id: docSnap.id,
             name: data.name,
             installmentAmount: Number(data.installmentAmount) || 0,
-            totalInstallments: Number(data.totalInstallments) || 1,
+            totalInstallments: Number(data.totalInstallments) || 0,
             paidInstallments: Number(data.paidInstallments) || 0,
             dueDate: data.dueDate,
-            category: data.category,
-            notes: data.notes,
-            color: data.color,
-            createdAt: data.createdAt,
+            category: data.category || '',
+            notes: data.notes || '',
+            color: data.color || '',
+            createdAt: data.createdAt || new Date().toISOString(),
+            billType: data.billType || (Number(data.totalInstallments) === 0 ? 'fixed' : 'installment'),
+            lastPaidMonth: data.lastPaidMonth || '',
+            iconName: data.iconName || '',
           });
         });
-        setBills(cloudBills);
+
+        // Mescla inteligente: mantém as contas da nuvem E preserva/sincroniza contas locais não enviadas
+        setBills(prevLocal => {
+          const cloudMap = new Map(cloudBills.map(b => [b.id, b]));
+          const unsynced = prevLocal.filter(b => !cloudMap.has(b.id));
+
+          // Envia contas locais pendentes para o Firestore para garantir persistência definitiva
+          if (unsynced.length > 0) {
+            unsynced.forEach(async b => {
+              try {
+                await setDoc(doc(db, 'payable_bills', b.id), {
+                  ...b,
+                  category: b.category || '',
+                  notes: b.notes || '',
+                  userId: uid,
+                  updatedAt: new Date().toISOString(),
+                });
+              } catch (e) {
+                console.error('Erro ao sincronizar conta pendente para a nuvem:', e);
+              }
+            });
+          }
+
+          // Monta lista final rigorosamente deduplicada por ID
+          const combined = [...cloudBills, ...unsynced];
+          const uniqueList: PayableBill[] = [];
+          const seen = new Set<string>();
+
+          combined.forEach(b => {
+            if (b && b.id && !seen.has(b.id)) {
+              seen.add(b.id);
+              uniqueList.push(b);
+            }
+          });
+
+          return uniqueList;
+        });
       },
       err => console.error('Erro ao sincronizar contas a pagar:', err)
     );
@@ -769,33 +823,76 @@ export default function App() {
   };
 
   const handleAddBill = async (bill: PayableBill) => {
+    const isFixed = bill.billType === 'fixed' || bill.totalInstallments === 0;
+    const cleanBill: PayableBill = {
+      id: bill.id,
+      name: bill.name.trim(),
+      installmentAmount: Number(bill.installmentAmount) || 0,
+      totalInstallments: isFixed ? 0 : (Number(bill.totalInstallments) || 1),
+      paidInstallments: Number(bill.paidInstallments) || 0,
+      dueDate: bill.dueDate,
+      category: bill.category || '',
+      notes: bill.notes || '',
+      color: bill.color || '',
+      createdAt: bill.createdAt || new Date().toISOString(),
+      billType: isFixed ? 'fixed' : 'installment',
+      lastPaidMonth: bill.lastPaidMonth || '',
+      iconName: bill.iconName || '',
+    };
+
+    // Atualiza estado local de forma estritamente deduplicada por ID
+    setBills(prev => {
+      const existsIndex = prev.findIndex(b => b.id === cleanBill.id);
+      if (existsIndex >= 0) {
+        const next = [...prev];
+        next[existsIndex] = cleanBill;
+        return next;
+      }
+      return [cleanBill, ...prev];
+    });
+
     if (currentUser) {
       try {
-        await setDoc(doc(db, 'payable_bills', bill.id), {
-          ...bill,
+        await setDoc(doc(db, 'payable_bills', cleanBill.id), {
+          ...cleanBill,
           userId: currentUser.uid,
+          updatedAt: new Date().toISOString(),
         });
       } catch (err) {
         console.error('Erro ao salvar conta a pagar no Firestore:', err);
       }
     }
-    setBills(prev => [bill, ...prev]);
-    showToast(`Conta "${bill.name}" cadastrada com sucesso!`);
+    showToast(`Conta ${isFixed ? 'fixa' : 'a pagar'} "${cleanBill.name}" cadastrada com sucesso!`);
   };
 
   const handleUpdateBill = async (bill: PayableBill) => {
+    const isFixed = bill.billType === 'fixed' || bill.totalInstallments === 0;
+    const cleanBill: PayableBill = {
+      ...bill,
+      name: bill.name.trim(),
+      installmentAmount: Number(bill.installmentAmount) || 0,
+      totalInstallments: isFixed ? 0 : (Number(bill.totalInstallments) || 1),
+      paidInstallments: Number(bill.paidInstallments) || 0,
+      category: bill.category || '',
+      notes: bill.notes || '',
+      billType: isFixed ? 'fixed' : 'installment',
+      lastPaidMonth: bill.lastPaidMonth || '',
+      iconName: bill.iconName || '',
+    };
+
     if (currentUser) {
       try {
-        await setDoc(doc(db, 'payable_bills', bill.id), {
-          ...bill,
+        await setDoc(doc(db, 'payable_bills', cleanBill.id), {
+          ...cleanBill,
           userId: currentUser.uid,
+          updatedAt: new Date().toISOString(),
         });
       } catch (err) {
         console.error('Erro ao atualizar conta no Firestore:', err);
       }
     }
-    setBills(prev => prev.map(b => (b.id === bill.id ? bill : b)));
-    showToast('Conta a pagar atualizada!');
+    setBills(prev => prev.map(b => (b.id === cleanBill.id ? cleanBill : b)));
+    showToast('Conta atualizada com sucesso!');
   };
 
   const handleDeleteBill = async (id: string) => {
@@ -814,6 +911,39 @@ export default function App() {
   const handlePayInstallment = async (id: string) => {
     const bill = bills.find(b => b.id === id);
     if (!bill) return;
+
+    // Caso seja uma Conta Fixa Mensal (ex: Água, Luz, Celular)
+    if (bill.billType === 'fixed' || bill.totalInstallments === 0) {
+      const nextDueDate = addMonthsToDate(bill.dueDate, 1);
+      const updated: PayableBill = {
+        ...bill,
+        billType: 'fixed',
+        lastPaidMonth: currentMonth,
+        paidInstallments: (bill.paidInstallments || 0) + 1,
+        dueDate: nextDueDate,
+        category: bill.category || '',
+        notes: bill.notes || '',
+        iconName: bill.iconName || '',
+      };
+
+      if (currentUser) {
+        try {
+          await setDoc(doc(db, 'payable_bills', id), {
+            ...updated,
+            userId: currentUser.uid,
+            updatedAt: new Date().toISOString(),
+          });
+        } catch (err) {
+          console.error('Erro ao pagar conta fixa no Firestore:', err);
+        }
+      }
+
+      setBills(prev => prev.map(b => (b.id === id ? updated : b)));
+      showToast(`Conta fixa "${bill.name}" marcada como paga para este mês! Vencimento avançado.`);
+      return;
+    }
+
+    // Caso seja parcelamento / financiamento
     if (bill.paidInstallments >= bill.totalInstallments) return;
 
     const nextPaid = bill.paidInstallments + 1;
@@ -822,6 +952,9 @@ export default function App() {
       ...bill,
       paidInstallments: nextPaid,
       dueDate: nextDueDate,
+      category: bill.category || '',
+      notes: bill.notes || '',
+      billType: 'installment',
     };
 
     if (currentUser) {
@@ -829,6 +962,7 @@ export default function App() {
         await setDoc(doc(db, 'payable_bills', id), {
           ...updated,
           userId: currentUser.uid,
+          updatedAt: new Date().toISOString(),
         });
       } catch (err) {
         console.error('Erro ao dar baixa em parcela no Firestore:', err);
@@ -841,7 +975,41 @@ export default function App() {
 
   const handleRevertInstallment = async (id: string) => {
     const bill = bills.find(b => b.id === id);
-    if (!bill || bill.paidInstallments <= 0) return;
+    if (!bill) return;
+
+    // Caso seja uma Conta Fixa Mensal
+    if (bill.billType === 'fixed' || bill.totalInstallments === 0) {
+      const prevDueDate = addMonthsToDate(bill.dueDate, -1);
+      const updated: PayableBill = {
+        ...bill,
+        billType: 'fixed',
+        lastPaidMonth: '',
+        paidInstallments: Math.max(0, (bill.paidInstallments || 1) - 1),
+        dueDate: prevDueDate,
+        category: bill.category || '',
+        notes: bill.notes || '',
+        iconName: bill.iconName || '',
+      };
+
+      if (currentUser) {
+        try {
+          await setDoc(doc(db, 'payable_bills', id), {
+            ...updated,
+            userId: currentUser.uid,
+            updatedAt: new Date().toISOString(),
+          });
+        } catch (err) {
+          console.error('Erro ao reverter conta fixa no Firestore:', err);
+        }
+      }
+
+      setBills(prev => prev.map(b => (b.id === id ? updated : b)));
+      showToast(`Pagamento da conta fixa "${bill.name}" revertido para pendente.`);
+      return;
+    }
+
+    // Caso seja parcelamento
+    if (bill.paidInstallments <= 0) return;
 
     const prevPaid = bill.paidInstallments - 1;
     const prevDueDate = addMonthsToDate(bill.dueDate, -1);
@@ -849,6 +1017,9 @@ export default function App() {
       ...bill,
       paidInstallments: prevPaid,
       dueDate: prevDueDate,
+      category: bill.category || '',
+      notes: bill.notes || '',
+      billType: 'installment',
     };
 
     if (currentUser) {
@@ -856,6 +1027,7 @@ export default function App() {
         await setDoc(doc(db, 'payable_bills', id), {
           ...updated,
           userId: currentUser.uid,
+          updatedAt: new Date().toISOString(),
         });
       } catch (err) {
         console.error('Erro ao reverter parcela no Firestore:', err);
@@ -873,6 +1045,8 @@ export default function App() {
     const updated: PayableBill = {
       ...bill,
       paidInstallments: bill.totalInstallments,
+      category: bill.category || '',
+      notes: bill.notes || '',
     };
 
     if (currentUser) {
@@ -880,6 +1054,7 @@ export default function App() {
         await setDoc(doc(db, 'payable_bills', id), {
           ...updated,
           userId: currentUser.uid,
+          updatedAt: new Date().toISOString(),
         });
       } catch (err) {
         console.error('Erro ao quitar conta no Firestore:', err);
@@ -934,6 +1109,7 @@ export default function App() {
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         onOpenNewTransaction={handleOpenNewTransaction}
+        onOpenNewBill={() => setIsCreateBillModalOpen(true)}
         onExportCSV={handleExportCSV}
         onOpenMonthlyReport={() => setIsReportModalOpen(true)}
         transactionsCount={transactions.length}
@@ -1069,6 +1245,8 @@ export default function App() {
               onPayInstallment={handlePayInstallment}
               onRevertInstallment={handleRevertInstallment}
               onPayoffBill={handlePayoffBill}
+              isCreateModalOpen={isCreateBillModalOpen}
+              onCloseCreateModal={() => setIsCreateBillModalOpen(false)}
             />
           </div>
         )}

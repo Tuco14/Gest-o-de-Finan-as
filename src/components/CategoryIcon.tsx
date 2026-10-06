@@ -19,7 +19,12 @@ import {
   Wallet,
   ArrowUpRight,
   ArrowDownLeft,
-  DollarSign
+  DollarSign,
+  Droplets,
+  Zap,
+  Smartphone,
+  Wifi,
+  Receipt
 } from 'lucide-react';
 
 interface CategoryIconProps {
@@ -48,6 +53,11 @@ export const CategoryIcon: React.FC<CategoryIconProps> = ({ name, className = 'w
     case 'Wallet': return <Wallet className={className} />;
     case 'ArrowUpRight': return <ArrowUpRight className={className} />;
     case 'ArrowDownLeft': return <ArrowDownLeft className={className} />;
+    case 'Droplets': return <Droplets className={className} />;
+    case 'Zap': return <Zap className={className} />;
+    case 'Smartphone': return <Smartphone className={className} />;
+    case 'Wifi': return <Wifi className={className} />;
+    case 'Receipt': return <Receipt className={className} />;
     default: return <DollarSign className={className} />;
   }
 };

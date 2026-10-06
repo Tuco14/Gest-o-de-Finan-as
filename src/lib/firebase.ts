@@ -12,6 +12,7 @@ import {
   type User 
 } from 'firebase/auth';
 import { 
+  initializeFirestore,
   getFirestore, 
   collection, 
   doc, 
@@ -28,7 +29,9 @@ import { firebaseConfig } from './firebaseConfig';
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
 export const auth = getAuth(app);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+export const db = initializeFirestore(app, {
+  ignoreUndefinedProperties: true,
+}, firebaseConfig.firestoreDatabaseId);
 
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({
