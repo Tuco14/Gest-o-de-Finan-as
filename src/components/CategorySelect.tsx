@@ -131,8 +131,8 @@ export const CategorySelect: React.FC<CategorySelectProps> = ({
   };
 
   // Criação detalhada de categoria
-  const handleDetailedCreate = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleDetailedCreate = async (e?: React.FormEvent | React.MouseEvent) => {
+    if (e && e.preventDefault) e.preventDefault();
     if (!customName.trim()) return;
 
     const newCat: Category = {
@@ -274,7 +274,7 @@ export const CategorySelect: React.FC<CategorySelectProps> = ({
 
           {/* Modo de Criação Detalhada (Form) */}
           {isCreatingCustom ? (
-            <form onSubmit={handleDetailedCreate} className="p-3 space-y-3 bg-zinc-850/70 border-b border-zinc-800">
+            <div className="p-3 space-y-3 bg-zinc-850/70 border-b border-zinc-800">
               <div className="flex items-center justify-between">
                 <h4 className="text-xs font-bold text-white flex items-center gap-1">
                   <Tag className="w-3.5 h-3.5 text-lime-400" />
@@ -354,12 +354,13 @@ export const CategorySelect: React.FC<CategorySelectProps> = ({
               </div>
 
               <button
-                type="submit"
+                type="button"
+                onClick={handleDetailedCreate}
                 className="w-full py-2 bg-lime-400 hover:bg-lime-300 text-zinc-950 text-xs font-bold rounded-xl transition-colors cursor-pointer"
               >
                 Confirmar e Adicionar Categoria
               </button>
-            </form>
+            </div>
           ) : null}
 
           {/* Lista de Categorias com Opção de Selecionar e Apagar */}

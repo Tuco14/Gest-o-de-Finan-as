@@ -26,7 +26,7 @@ import { UpcomingBills } from './components/UpcomingBills';
 import { BillsView } from './components/BillsView';
 import { ResetConfirmModal } from './components/ResetConfirmModal';
 import { OfflineIndicator } from './components/OfflineIndicator';
-import { formatCurrency } from './utils/formatters';
+import { formatCurrency, deduplicateById, generateId } from './utils/formatters';
 import { 
   CheckCircle, 
   RotateCcw, 
@@ -68,11 +68,14 @@ if (typeof window !== 'undefined') {
 }
 
 export default function App() {
-  // LocalStorage initialization
+  // LocalStorage initialization - com rigorosa deduplicação por ID
   const [transactions, setTransactions] = useState<Transaction[]>(() => {
     const saved = localStorage.getItem('fincontrol_transactions');
     if (saved) {
-      try { return JSON.parse(saved); } catch (e) { console.error(e); }
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return deduplicateById<Transaction>(parsed);
+      } catch (e) { console.error(e); }
     }
     return INITIAL_TRANSACTIONS;
   });
@@ -80,15 +83,21 @@ export default function App() {
   const [categories, setCategories] = useState<Category[]>(() => {
     const saved = localStorage.getItem('fincontrol_categories');
     if (saved) {
-      try { return JSON.parse(saved); } catch (e) { console.error(e); }
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return deduplicateById<Category>(parsed);
+      } catch (e) { console.error(e); }
     }
     return INITIAL_CATEGORIES;
   });
 
   const [accounts, setAccounts] = useState<Account[]>(() => {
     const saved = localStorage.getItem('fincontrol_accounts');
-    if (saved) {
-      try { return JSON.parse(saved); } catch (e) { console.error(e); }
+    if (saved !== null) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return deduplicateById<Account>(parsed);
+      } catch (e) { console.error(e); }
     }
     return INITIAL_ACCOUNTS;
   });
@@ -96,7 +105,10 @@ export default function App() {
   const [goals, setGoals] = useState<FinancialGoal[]>(() => {
     const saved = localStorage.getItem('fincontrol_goals');
     if (saved) {
-      try { return JSON.parse(saved); } catch (e) { console.error(e); }
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return deduplicateById<FinancialGoal>(parsed);
+      } catch (e) { console.error(e); }
     }
     return INITIAL_GOALS;
   });
@@ -106,16 +118,7 @@ export default function App() {
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-          // Deduplica por ID para limpar quaisquer duplicatas pré-existentes
-          const map = new Map<string, PayableBill>();
-          parsed.forEach((b: PayableBill) => {
-            if (b && b.id && !map.has(b.id)) {
-              map.set(b.id, b);
-            }
-          });
-          return Array.from(map.values());
-        }
+        if (Array.isArray(parsed)) return deduplicateById<PayableBill>(parsed);
       } catch (e) {
         console.error(e);
       }
@@ -216,9 +219,10 @@ export default function App() {
           });
         });
 
-        // Ordenar por data decrescente
-        cloudTxs.sort((a, b) => b.date.localeCompare(a.date));
-        setTransactions(cloudTxs);
+        // Deduplica estritamente por ID e ordena por data decrescente
+        const uniqueTxs = deduplicateById(cloudTxs);
+        uniqueTxs.sort((a, b) => b.date.localeCompare(a.date));
+        setTransactions(uniqueTxs);
         setIsSyncing(false);
       },
       error => {
@@ -246,15 +250,11 @@ export default function App() {
               iconName: data.iconName,
             });
           });
-          setAccounts(cloudAccs);
+          const uniqueAccs = deduplicateById(cloudAccs);
+          setAccounts(uniqueAccs);
         } else {
-          // Se na nuvem não existirem contas ainda para esse usuário, inicializa as contas padrão na nuvem
-          INITIAL_ACCOUNTS.forEach(async acc => {
-            await setDoc(doc(db, 'accounts', `${uid}_${acc.id}`), {
-              ...acc,
-              userId: uid,
-            });
-          });
+          // Quando a nuvem está vazia (usuário excluiu todas as contas), respeita a exclusão e NUNCA ressuscita contas
+          setAccounts([]);
         }
       },
       err => console.error('Erro ao sincronizar contas:', err)
@@ -278,15 +278,10 @@ export default function App() {
               budgetMonthly: Number(data.budgetMonthly) || 0,
             });
           });
-          setCategories(cloudCats);
+          setCategories(deduplicateById(cloudCats));
         } else {
-          // Inicializa categorias padrão na nuvem
-          INITIAL_CATEGORIES.forEach(async cat => {
-            await setDoc(doc(db, 'categories', `${uid}_${cat.id}`), {
-              ...cat,
-              userId: uid,
-            });
-          });
+          // Respeita lista vazia se o usuário excluir categorias
+          setCategories([]);
         }
       },
       err => console.error('Erro ao sincronizar categorias:', err)
@@ -310,7 +305,7 @@ export default function App() {
             color: data.color,
           });
         });
-        setGoals(cloudGoals);
+        setGoals(deduplicateById(cloudGoals));
       },
       err => console.error('Erro ao sincronizar metas:', err)
     );
@@ -429,8 +424,12 @@ export default function App() {
     let totalExpense = 0;
     let pendingExpense = 0;
 
+    // Deduplica transações por ID para que o cálculo seja 100% blindado contra duplicatas
+    const seenTxIds = new Set<string>();
+
     transactions.forEach(t => {
-      if (t.date.startsWith(currentMonth)) {
+      if (t && t.id && !seenTxIds.has(t.id) && t.date.startsWith(currentMonth)) {
+        seenTxIds.add(t.id);
         if (t.type === 'income') {
           totalIncome += t.amount;
           if (t.status === 'pending') pendingIncome += t.amount;
@@ -441,18 +440,19 @@ export default function App() {
       }
     });
 
+    const uniqueAccounts = deduplicateById(accounts);
     // Saldo da conta do banco (apenas contas bancárias do tipo 'checking')
-    const bankAccounts = accounts.filter(a => a.type === 'checking');
+    const bankAccounts = uniqueAccounts.filter(a => a.type === 'checking');
     
     // Se houver contas do tipo 'checking', puxa estritamente delas
     // Caso contrário, busca contas que não sejam carteira física ('cash') e nem cartão de crédito ('credit')
     const targetAccounts = bankAccounts.length > 0 
       ? bankAccounts 
-      : accounts.filter(a => a.type !== 'credit' && a.type !== 'cash');
+      : uniqueAccounts.filter(a => a.type !== 'credit' && a.type !== 'cash');
 
     const totalBalance = targetAccounts.length > 0 
       ? targetAccounts.reduce((sum, a) => sum + a.balance, 0)
-      : (accounts.length > 0 ? accounts[0].balance : 0);
+      : (uniqueAccounts.length > 0 ? uniqueAccounts[0].balance : 0);
 
     const bankAccountName = targetAccounts.length === 1 
       ? targetAccounts[0].name 
@@ -483,11 +483,18 @@ export default function App() {
   };
 
   const handleSaveTransaction = async (tx: Transaction) => {
+    // Atualização estritamente deduplicada por ID (imune a double calls e StrictMode)
+    setTransactions(prev => {
+      const filtered = prev.filter(t => t.id !== tx.id);
+      return [tx, ...filtered];
+    });
+
     if (currentUser) {
       try {
         await setDoc(doc(db, 'transactions', tx.id), {
           ...tx,
           userId: currentUser.uid,
+          updatedAt: new Date().toISOString(),
         });
       } catch (err) {
         console.error('Erro ao salvar no Firestore:', err);
@@ -495,10 +502,8 @@ export default function App() {
     }
 
     if (editingTransaction) {
-      setTransactions(prev => prev.map(t => (t.id === tx.id ? tx : t)));
       showToast('Transação atualizada com sucesso!');
     } else {
-      setTransactions(prev => [tx, ...prev]);
       showToast('Novo lançamento registrado com sucesso!');
     }
   };
@@ -598,23 +603,25 @@ export default function App() {
   const handleDuplicateTransaction = async (tx: Transaction) => {
     const duplicated: Transaction = {
       ...tx,
-      id: `tx-${Date.now()}`,
+      id: `tx-${generateId()}`,
       description: `${tx.description} (Cópia)`,
       createdAt: new Date().toISOString(),
     };
+
+    setTransactions(prev => [duplicated, ...prev]);
 
     if (currentUser) {
       try {
         await setDoc(doc(db, 'transactions', duplicated.id), {
           ...duplicated,
           userId: currentUser.uid,
+          updatedAt: new Date().toISOString(),
         });
       } catch (err) {
         console.error('Erro ao duplicar transação no Firestore:', err);
       }
     }
 
-    setTransactions(prev => [duplicated, ...prev]);
     showToast('Transação duplicada!');
   };
 
@@ -652,11 +659,8 @@ export default function App() {
     }
 
     setCategories(prev => {
-      const exists = prev.some(c => c.id === newCat.id);
-      if (exists) {
-        return prev.map(c => (c.id === newCat.id ? newCat : c));
-      }
-      return [...prev, newCat];
+      const filtered = prev.filter(c => c.id !== newCat.id);
+      return [...filtered, newCat];
     });
 
     showToast(`Categoria "${newCat.name}" salva com sucesso!`);
@@ -681,18 +685,23 @@ export default function App() {
   };
 
   const handleAddGoal = async (goal: FinancialGoal) => {
+    setGoals(prev => {
+      const filtered = prev.filter(g => g.id !== goal.id);
+      return [...filtered, goal];
+    });
+
     if (currentUser) {
       try {
         await setDoc(doc(db, 'goals', goal.id), {
           ...goal,
           userId: currentUser.uid,
+          updatedAt: new Date().toISOString(),
         });
       } catch (err) {
         console.error('Erro ao salvar meta no Firestore:', err);
       }
     }
 
-    setGoals(prev => [...prev, goal]);
     showToast('Nova meta financeira criada!');
   };
 
@@ -732,30 +741,37 @@ export default function App() {
 
   // Handlers para Contas
   const handleAddAccount = async (acc: Account) => {
+    // Atualiza estado local de forma estritamente deduplicada por ID (imune a re-execuções e StrictMode)
+    setAccounts(prev => {
+      const filtered = prev.filter(a => a.id !== acc.id);
+      return [...filtered, acc];
+    });
+
     if (currentUser) {
       try {
         await setDoc(doc(db, 'accounts', acc.id), {
           ...acc,
           userId: currentUser.uid,
+          updatedAt: new Date().toISOString(),
         });
       } catch (err) {
         console.error('Erro ao salvar conta no Firestore:', err);
       }
     }
-    setAccounts(prev => [...prev, acc]);
     showToast('Conta adicionada com sucesso!');
   };
 
   const handleDeleteAccount = async (accId: string) => {
-    const accountToDelete = accounts.find(a => a.id === accId);
+    const accountToDelete = accounts.find(a => a.id === accId || a.id === `${currentUser?.uid}_${accId}`);
     if (currentUser) {
       try {
         await deleteDoc(doc(db, 'accounts', accId));
+        await deleteDoc(doc(db, 'accounts', `${currentUser.uid}_${accId}`));
       } catch (err) {
         console.error('Erro ao excluir conta no Firestore:', err);
       }
     }
-    setAccounts(prev => prev.filter(a => a.id !== accId));
+    setAccounts(prev => prev.filter(a => a.id !== accId && a.id !== `${currentUser?.uid}_${accId}`));
     showToast(`Conta "${accountToDelete?.name || 'selecionada'}" removida com sucesso!`);
   };
 
@@ -842,13 +858,8 @@ export default function App() {
 
     // Atualiza estado local de forma estritamente deduplicada por ID
     setBills(prev => {
-      const existsIndex = prev.findIndex(b => b.id === cleanBill.id);
-      if (existsIndex >= 0) {
-        const next = [...prev];
-        next[existsIndex] = cleanBill;
-        return next;
-      }
-      return [cleanBill, ...prev];
+      const filtered = prev.filter(b => b.id !== cleanBill.id);
+      return [cleanBill, ...filtered];
     });
 
     if (currentUser) {
@@ -1072,6 +1083,10 @@ export default function App() {
     localStorage.removeItem('fincontrol_accounts');
     localStorage.removeItem('fincontrol_goals');
     localStorage.removeItem('fincontrol_payable_bills');
+    if (currentUser) {
+      localStorage.removeItem(`fincontrol_accounts_seeded_${currentUser.uid}`);
+      localStorage.removeItem(`fincontrol_categories_seeded_${currentUser.uid}`);
+    }
     localStorage.setItem('fincontrol_version', APP_STORAGE_VERSION);
     setTransactions(INITIAL_TRANSACTIONS);
     setCategories(INITIAL_CATEGORIES);

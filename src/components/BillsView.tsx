@@ -762,18 +762,18 @@ export const BillsView: React.FC<BillsViewProps> = ({
           {bills.length === 0 && (
             <div className="flex items-center justify-center gap-3 pt-2">
               <button
-                onClick={() => handleOpenPreset(FIXED_BILL_PRESETS[0])}
+                onClick={() => handleOpenCreate('fixed')}
                 className="inline-flex items-center gap-2 px-4 py-2 bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 text-xs font-bold rounded-xl border border-sky-500/40 cursor-pointer"
               >
-                <Droplets className="w-4 h-4" />
-                <span>Adicionar Conta de Água</span>
+                <Receipt className="w-4 h-4" />
+                <span>Adicionar Conta Fixa</span>
               </button>
               <button
-                onClick={() => handleOpenCreate('fixed')}
+                onClick={() => handleOpenCreate('installment')}
                 className="inline-flex items-center gap-2 px-4 py-2 bg-lime-400 hover:bg-lime-300 text-zinc-950 text-xs font-bold rounded-xl cursor-pointer shadow-md shadow-lime-400/20"
               >
-                <Plus className="w-4 h-4 stroke-[2.5]" />
-                <span>Cadastrar Conta Manual</span>
+                <CreditCard className="w-4 h-4" />
+                <span>Adicionar Parcelamento</span>
               </button>
             </div>
           )}

@@ -30,3 +30,20 @@ export function formatPercent(value: number): string {
 export function generateId(): string {
   return Math.random().toString(36).substring(2, 9) + Date.now().toString(36);
 }
+
+/**
+ * Remove com precisão qualquer item duplicado em uma lista garantindo unicidade estrita por ID
+ */
+export function deduplicateById<T extends Record<string, any>>(items: T[]): T[] {
+  if (!Array.isArray(items)) return [];
+  const seen = new Set<string>();
+  const result: T[] = [];
+  for (const item of items) {
+    const id = item?.id;
+    if (id && !seen.has(String(id))) {
+      seen.add(String(id));
+      result.push(item);
+    }
+  }
+  return result;
+}

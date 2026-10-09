@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Category, Transaction, FinancialGoal, TransactionType } from '../types';
-import { formatCurrency, formatDateBR, generateId } from '../utils/formatters';
+import { formatCurrency, formatDateBR, generateId, deduplicateById } from '../utils/formatters';
 import { CategoryIcon } from './CategoryIcon';
 import { 
   Target, 
@@ -83,7 +83,7 @@ export const BudgetsView: React.FC<BudgetsViewProps> = ({
   // Gastos do mês por categoria
   const categorySpentMap = useMemo(() => {
     const map: Record<string, number> = {};
-    transactions.forEach(t => {
+    deduplicateById(transactions).forEach(t => {
       if (t.type === 'expense' && t.date.startsWith(currentMonth)) {
         map[t.category] = (map[t.category] || 0) + t.amount;
       }
@@ -93,7 +93,7 @@ export const BudgetsView: React.FC<BudgetsViewProps> = ({
 
   // Lista de categorias com orçamento definido
   const budgetCategories = useMemo(() => {
-    return categories
+    return deduplicateById(categories)
       .filter(c => c.type === 'expense' || c.type === 'both')
       .map(cat => {
         const spent = categorySpentMap[cat.id] || 0;
@@ -126,6 +126,9 @@ export const BudgetsView: React.FC<BudgetsViewProps> = ({
       remaining: totalBudget - totalSpent,
     };
   }, [budgetCategories]);
+
+  // Metas financeiras estritamente deduplicadas
+  const uniqueGoals = useMemo(() => deduplicateById(goals), [goals]);
 
   const handleSaveBudget = (catId: string) => {
     const num = parseFloat(tempBudgetVal.replace(',', '.'));
@@ -747,7 +750,7 @@ export const BudgetsView: React.FC<BudgetsViewProps> = ({
         )}
 
         {/* Lista de Metas */}
-        {goals.length === 0 ? (
+        {uniqueGoals.length === 0 ? (
           <div className="text-center py-10 px-4 bg-zinc-850/40 border border-dashed border-zinc-800 rounded-2xl">
             <Sparkles className="w-8 h-8 text-zinc-500 mx-auto mb-2" />
             <h4 className="font-bold text-white text-sm">Nenhuma meta financeira cadastrada</h4>
@@ -764,7 +767,7 @@ export const BudgetsView: React.FC<BudgetsViewProps> = ({
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-            {goals.map(goal => {
+            {uniqueGoals.map(goal => {
               const percent = goal.targetAmount > 0 ? (goal.currentAmount / goal.targetAmount) * 100 : 0;
               const isCompleted = percent >= 100;
 

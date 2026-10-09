@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Account } from '../types';
-import { formatCurrency, generateId } from '../utils/formatters';
+import { formatCurrency, generateId, deduplicateById } from '../utils/formatters';
 import { CategoryIcon } from './CategoryIcon';
 import { Landmark, Plus, CreditCard, Wallet, ShieldCheck, Edit3, Trash2 } from 'lucide-react';
 
@@ -20,6 +20,7 @@ export const AccountsSummary: React.FC<AccountsSummaryProps> = ({
   onDeleteAccount,
 }) => {
   const [isAdding, setIsAdding] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [name, setName] = useState('');
   const [institution, setInstitution] = useState('');
   const [type, setType] = useState<Account['type']>('checking');
@@ -29,10 +30,16 @@ export const AccountsSummary: React.FC<AccountsSummaryProps> = ({
   const [editBalanceVal, setEditBalanceVal] = useState('');
   const [accountToDelete, setAccountToDelete] = useState<Account | null>(null);
 
+  const uniqueAccounts = useMemo(() => deduplicateById(accounts), [accounts]);
+
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
+
     const num = parseFloat(balance.replace(',', '.'));
     if (!name.trim() || isNaN(num)) return;
+
+    setIsSubmitting(true);
 
     const newAcc: Account = {
       id: `acc-${generateId()}`,
@@ -49,6 +56,7 @@ export const AccountsSummary: React.FC<AccountsSummaryProps> = ({
     setName('');
     setInstitution('');
     setBalance('');
+    setTimeout(() => setIsSubmitting(false), 400);
   };
 
   const handleSaveBalance = (accId: string) => {
@@ -126,9 +134,12 @@ export const AccountsSummary: React.FC<AccountsSummaryProps> = ({
             </button>
             <button
               type="submit"
-              className="px-3 py-1 bg-lime-400 hover:bg-lime-300 text-zinc-950 font-bold rounded-lg cursor-pointer"
+              disabled={isSubmitting}
+              className={`px-3 py-1 font-bold rounded-lg transition-colors cursor-pointer ${
+                isSubmitting ? 'bg-zinc-700 text-zinc-400 cursor-not-allowed' : 'bg-lime-400 hover:bg-lime-300 text-zinc-950'
+              }`}
             >
-              Salvar
+              {isSubmitting ? 'Salvando...' : 'Salvar'}
             </button>
           </div>
         </form>
@@ -181,7 +192,7 @@ export const AccountsSummary: React.FC<AccountsSummaryProps> = ({
         </div>
       )}
 
-      {accounts.length === 0 ? (
+      {uniqueAccounts.length === 0 ? (
         <div className="text-center py-8 border border-dashed border-zinc-800 rounded-xl">
           <Landmark className="w-8 h-8 text-zinc-600 mx-auto mb-2" />
           <p className="text-xs text-zinc-400 font-semibold">Nenhuma conta cadastrada</p>
@@ -189,7 +200,7 @@ export const AccountsSummary: React.FC<AccountsSummaryProps> = ({
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-          {accounts.map(acc => {
+          {uniqueAccounts.map(acc => {
             const isEditing = editingId === acc.id;
 
             return (

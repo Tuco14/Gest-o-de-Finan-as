@@ -51,9 +51,11 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
   const [status, setStatus] = useState<TransactionStatus>('paid');
   const [notes, setNotes] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Reset or fill form when opening
   useEffect(() => {
+    setIsSubmitting(false);
     if (editingTransaction) {
       setType(editingTransaction.type);
       setDescription(editingTransaction.description);
@@ -115,10 +117,14 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       newErrors.date = 'Informe a data';
     }
 
+    if (isSubmitting) return;
+
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
       return;
     }
+
+    setIsSubmitting(true);
 
     const transactionData: Transaction = {
       id: editingTransaction ? editingTransaction.id : `tx-${generateId()}`,
@@ -136,6 +142,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
 
     onSave(transactionData);
     onClose();
+    setTimeout(() => setIsSubmitting(false), 400);
   };
 
   return (
@@ -400,9 +407,12 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
             <button
               type="submit"
               id="save-transaction-btn"
-              className="px-5 py-2.5 rounded-xl text-xs font-bold text-zinc-950 bg-lime-400 hover:bg-lime-300 shadow-md shadow-lime-400/20 transition-all cursor-pointer active:scale-98"
+              disabled={isSubmitting}
+              className={`px-5 py-2.5 rounded-xl text-xs font-bold text-zinc-950 transition-all cursor-pointer active:scale-98 ${
+                isSubmitting ? 'bg-zinc-600 opacity-60 cursor-not-allowed' : 'bg-lime-400 hover:bg-lime-300 shadow-md shadow-lime-400/20'
+              }`}
             >
-              {editingTransaction ? 'Atualizar Transação' : 'Salvar Transação'}
+              {isSubmitting ? 'Salvando...' : (editingTransaction ? 'Atualizar Transação' : 'Salvar Transação')}
             </button>
           </div>
         </form>

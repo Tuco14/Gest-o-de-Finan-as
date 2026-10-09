@@ -1,6 +1,6 @@
 import React from 'react';
 import { Transaction, Category } from '../types';
-import { formatCurrency, formatDateBR } from '../utils/formatters';
+import { formatCurrency, formatDateBR, deduplicateById } from '../utils/formatters';
 import { CategoryIcon } from './CategoryIcon';
 import { CalendarClock, CheckCircle2, ArrowRight } from 'lucide-react';
 
@@ -24,7 +24,7 @@ export const UpcomingBills: React.FC<UpcomingBillsProps> = ({
   const categoryMap = new Map<string, Category>(categories.map(c => [c.id, c]));
 
   // Filtrar pendentes do mês ordenadas por data
-  const pendingBills = transactions
+  const pendingBills = deduplicateById(transactions)
     .filter(t => t.status === 'pending' && t.date.startsWith(currentMonth))
     .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
     .slice(0, 4);

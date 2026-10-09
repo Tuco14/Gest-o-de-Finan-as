@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Transaction } from '../types';
-import { formatCurrency } from '../utils/formatters';
+import { formatCurrency, deduplicateById } from '../utils/formatters';
 import { BarChart2, TrendingUp, Calendar } from 'lucide-react';
 
 interface CashFlowChartProps {
@@ -34,7 +34,7 @@ export const CashFlowChart: React.FC<CashFlowChartProps> = ({
     let tIncome = 0;
     let tExpense = 0;
 
-    transactions.forEach(t => {
+    deduplicateById(transactions).forEach(t => {
       if (t.date.startsWith(currentMonth)) {
         const day = parseInt(t.date.split('-')[2], 10);
         if (dailyMap[day]) {

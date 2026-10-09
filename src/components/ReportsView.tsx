@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { Transaction, Category } from '../types';
-import { formatCurrency, formatMonthYear } from '../utils/formatters';
+import { formatCurrency, formatMonthYear, deduplicateById } from '../utils/formatters';
 import { 
   BarChart3, 
   ShieldCheck, 

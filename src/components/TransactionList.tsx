@@ -6,7 +6,7 @@ import {
   TransactionType, 
   TransactionStatus 
 } from '../types';
-import { formatCurrency, formatDateBR } from '../utils/formatters';
+import { formatCurrency, formatDateBR, deduplicateById } from '../utils/formatters';
 import { CategoryIcon } from './CategoryIcon';
 import { 
   Search, 
@@ -78,7 +78,9 @@ export const TransactionList: React.FC<TransactionListProps> = ({
 
   // Filtragem e ordenação
   const filteredTransactions = useMemo(() => {
-    return transactions
+    const uniqueTxList = deduplicateById(transactions);
+
+    return uniqueTxList
       .filter(tx => {
         // Search term
         if (searchTerm.trim()) {
