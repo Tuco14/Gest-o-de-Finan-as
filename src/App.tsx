@@ -315,62 +315,31 @@ export default function App() {
     const unsubBills = onSnapshot(
       qBills,
       snapshot => {
-        const cloudBills: PayableBill[] = [];
-        snapshot.forEach(docSnap => {
-          const data = docSnap.data();
-          cloudBills.push({
-            id: docSnap.id,
-            name: data.name,
-            installmentAmount: Number(data.installmentAmount) || 0,
-            totalInstallments: Number(data.totalInstallments) || 0,
-            paidInstallments: Number(data.paidInstallments) || 0,
-            dueDate: data.dueDate,
-            category: data.category || '',
-            notes: data.notes || '',
-            color: data.color || '',
-            createdAt: data.createdAt || new Date().toISOString(),
-            billType: data.billType || (Number(data.totalInstallments) === 0 ? 'fixed' : 'installment'),
-            lastPaidMonth: data.lastPaidMonth || '',
-            iconName: data.iconName || '',
-          });
-        });
-
-        // Mescla inteligente: mantém as contas da nuvem E preserva/sincroniza contas locais não enviadas
-        setBills(prevLocal => {
-          const cloudMap = new Map(cloudBills.map(b => [b.id, b]));
-          const unsynced = prevLocal.filter(b => !cloudMap.has(b.id));
-
-          // Envia contas locais pendentes para o Firestore para garantir persistência definitiva
-          if (unsynced.length > 0) {
-            unsynced.forEach(async b => {
-              try {
-                await setDoc(doc(db, 'payable_bills', b.id), {
-                  ...b,
-                  category: b.category || '',
-                  notes: b.notes || '',
-                  userId: uid,
-                  updatedAt: new Date().toISOString(),
-                });
-              } catch (e) {
-                console.error('Erro ao sincronizar conta pendente para a nuvem:', e);
-              }
+        if (!snapshot.empty) {
+          const cloudBills: PayableBill[] = [];
+          snapshot.forEach(docSnap => {
+            const data = docSnap.data();
+            cloudBills.push({
+              id: docSnap.id,
+              name: data.name,
+              installmentAmount: Number(data.installmentAmount) || 0,
+              totalInstallments: Number(data.totalInstallments) || 0,
+              paidInstallments: Number(data.paidInstallments) || 0,
+              dueDate: data.dueDate,
+              category: data.category || '',
+              notes: data.notes || '',
+              color: data.color || '',
+              createdAt: data.createdAt || new Date().toISOString(),
+              billType: data.billType || (Number(data.totalInstallments) === 0 ? 'fixed' : 'installment'),
+              lastPaidMonth: data.lastPaidMonth || '',
+              iconName: data.iconName || '',
             });
-          }
-
-          // Monta lista final rigorosamente deduplicada por ID
-          const combined = [...cloudBills, ...unsynced];
-          const uniqueList: PayableBill[] = [];
-          const seen = new Set<string>();
-
-          combined.forEach(b => {
-            if (b && b.id && !seen.has(b.id)) {
-              seen.add(b.id);
-              uniqueList.push(b);
-            }
           });
-
-          return uniqueList;
-        });
+          setBills(deduplicateById(cloudBills));
+        } else {
+          // Se não há contas na nuvem (ou todas foram excluídas pelo usuário), mantém lista limpa
+          setBills([]);
+        }
       },
       err => console.error('Erro ao sincronizar contas a pagar:', err)
     );
@@ -907,16 +876,37 @@ export default function App() {
   };
 
   const handleDeleteBill = async (id: string) => {
-    const bill = bills.find(b => b.id === id);
+    const bill = bills.find(b => b.id === id || (currentUser && b.id === `${currentUser.uid}_${id}`));
+    // Atualiza estado local imediatamente
+    setBills(prev => prev.filter(b => b.id !== id && (!currentUser || b.id !== `${currentUser.uid}_${id}`)));
+
+    // Atualiza localStorage imediatamente para persistência local consistente
+    try {
+      const saved = localStorage.getItem('fincontrol_payable_bills');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          localStorage.setItem(
+            'fincontrol_payable_bills',
+            JSON.stringify(parsed.filter((b: PayableBill) => b.id !== id && (!currentUser || b.id !== `${currentUser.uid}_${id}`)))
+          );
+        }
+      }
+    } catch (e) {
+      console.error('Erro ao atualizar localStorage na exclusão da conta:', e);
+    }
+
     if (currentUser) {
       try {
         await deleteDoc(doc(db, 'payable_bills', id));
+        if (!id.startsWith(currentUser.uid)) {
+          await deleteDoc(doc(db, 'payable_bills', `${currentUser.uid}_${id}`)).catch(() => {});
+        }
       } catch (err) {
         console.error('Erro ao excluir conta no Firestore:', err);
       }
     }
-    setBills(prev => prev.filter(b => b.id !== id));
-    showToast(`Conta "${bill?.name || 'selecionada'}" excluída`);
+    showToast(`Conta "${bill?.name || 'selecionada'}" excluída com sucesso!`);
   };
 
   const handlePayInstallment = async (id: string) => {
