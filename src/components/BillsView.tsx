@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { PayableBill, Category } from '../types';
+import { PayableBill, Category, Account } from '../types';
 import { formatCurrency } from '../utils/formatters';
 import { 
   CreditCard, 
@@ -29,20 +29,22 @@ import {
   Check,
   HelpCircle,
   Filter,
-  DollarSign
+  DollarSign,
+  Landmark
 } from 'lucide-react';
 
 interface BillsViewProps {
   bills: PayableBill[];
   categories: Category[];
+  accounts?: Account[];
   privacyMode: boolean;
   currentMonth: string;
   onAddBill: (bill: PayableBill) => void;
   onUpdateBill: (bill: PayableBill) => void;
   onDeleteBill: (id: string) => void;
-  onPayInstallment: (id: string) => void;
+  onPayInstallment: (id: string, customAccountId?: string) => void;
   onRevertInstallment: (id: string) => void;
-  onPayoffBill: (id: string) => void;
+  onPayoffBill: (id: string, customAccountId?: string) => void;
   isCreateModalOpen?: boolean;
   onCloseCreateModal?: () => void;
 }
@@ -104,6 +106,7 @@ const FIXED_BILL_PRESETS: FixedPreset[] = [
 export const BillsView: React.FC<BillsViewProps> = ({
   bills,
   categories,
+  accounts = [],
   privacyMode,
   currentMonth,
   onAddBill,
@@ -115,6 +118,23 @@ export const BillsView: React.FC<BillsViewProps> = ({
   isCreateModalOpen,
   onCloseCreateModal,
 }) => {
+  // Encontra a conta bancária principal padrão (PicPay / Saldo Disponível)
+  const defaultDebitAccountId = useMemo(() => {
+    if (!accounts || accounts.length === 0) return '';
+    const main = accounts.find(a => a.isMain);
+    if (main) return main.id;
+    const picpay = accounts.find(a => 
+      (a.name && a.name.toLowerCase().includes('picpay')) ||
+      (a.institution && a.institution.toLowerCase().includes('picpay'))
+    );
+    if (picpay) return picpay.id;
+    const checking = accounts.find(a => a.type === 'checking');
+    if (checking) return checking.id;
+    const nonCredit = accounts.find(a => a.type !== 'credit');
+    if (nonCredit) return nonCredit.id;
+    return accounts[0]?.id || '';
+  }, [accounts]);
+
   // Filtros
   const [searchTerm, setSearchTerm] = useState('');
   const [typeFilter, setTypeFilter] = useState<'all' | 'fixed' | 'installment'>('all');
@@ -139,8 +159,16 @@ export const BillsView: React.FC<BillsViewProps> = ({
     return today.toISOString().split('T')[0];
   });
   const [category, setCategory] = useState('');
+  const [accountId, setAccountId] = useState(defaultDebitAccountId);
   const [notes, setNotes] = useState('');
   const [selectedIcon, setSelectedIcon] = useState('Receipt');
+
+  // Mantém accountId sincronizado com a conta padrão quando carregar
+  React.useEffect(() => {
+    if (!accountId && defaultDebitAccountId) {
+      setAccountId(defaultDebitAccountId);
+    }
+  }, [defaultDebitAccountId]);
 
   // Fecha e limpa completamente o modal
   const handleCloseModal = () => {
@@ -153,6 +181,7 @@ export const BillsView: React.FC<BillsViewProps> = ({
     setPaidInstallments('0');
     setDueDay('10');
     setCategory(categories[0]?.id || '');
+    setAccountId(defaultDebitAccountId);
     setNotes('');
     setSelectedIcon('Receipt');
     setIsSubmitting(false);
@@ -171,6 +200,7 @@ export const BillsView: React.FC<BillsViewProps> = ({
     setPaidInstallments('0');
     setDueDay('10');
     setCategory(categories[0]?.id || '');
+    setAccountId(defaultDebitAccountId);
     setNotes('');
     setSelectedIcon(initialType === 'fixed' ? 'Droplets' : 'CreditCard');
     const today = new Date();
@@ -195,6 +225,7 @@ export const BillsView: React.FC<BillsViewProps> = ({
       c.name.toLowerCase().includes(preset.defaultCategoryName.toLowerCase().split('&')[0].trim())
     );
     setCategory(matchingCat?.id || categories[0]?.id || '');
+    setAccountId(defaultDebitAccountId);
     setNotes(preset.description);
 
     const now = new Date();
@@ -234,6 +265,7 @@ export const BillsView: React.FC<BillsViewProps> = ({
     }
     
     setCategory(bill.category || categories[0]?.id || '');
+    setAccountId(bill.accountId || defaultDebitAccountId);
     setNotes(bill.notes || '');
     setSelectedIcon(bill.iconName || (isFixed ? 'Receipt' : 'CreditCard'));
     setIsSubmitting(false);
@@ -278,11 +310,13 @@ export const BillsView: React.FC<BillsViewProps> = ({
       paidInstallments: Math.min(paidInstNum, totalInstNum),
       dueDate: computedDueDate || new Date().toISOString().split('T')[0],
       category: category || '',
+      accountId: accountId || defaultDebitAccountId,
       notes: notes.trim() || '',
       createdAt: editingBill?.createdAt || new Date().toISOString(),
       billType: isFixed ? 'fixed' : 'installment',
       lastPaidMonth: editingBill?.lastPaidMonth || '',
       iconName: selectedIcon || (isFixed ? 'Receipt' : 'CreditCard'),
+      transactionIds: editingBill?.transactionIds || [],
     };
 
     if (editingBill) {
@@ -833,7 +867,7 @@ export const BillsView: React.FC<BillsViewProps> = ({
                             {status.label}
                           </span>
                         </div>
-                        <div className="flex items-center gap-2 mt-1 text-xs text-zinc-400">
+                        <div className="flex items-center gap-2 mt-1 text-xs text-zinc-400 flex-wrap">
                           <span className="flex items-center gap-1">
                             <Calendar className="w-3.5 h-3.5 text-lime-400 shrink-0" />
                             <span>Vencimento: <strong className="text-zinc-200">{formatDueDisplay(bill.dueDate, isFixed)}</strong></span>
@@ -843,6 +877,19 @@ export const BillsView: React.FC<BillsViewProps> = ({
                             isFixed ? 'bg-sky-500/10 text-sky-400 border border-sky-500/20' : 'bg-purple-500/10 text-purple-400 border border-purple-500/20'
                           }`}>
                             {isFixed ? 'Conta Fixa Mensal' : 'Parcelamento'}
+                          </span>
+                          <span className="text-zinc-600">•</span>
+                          <span className="flex items-center gap-1 text-[11px] text-zinc-300">
+                            <Landmark className="w-3 h-3 text-lime-400 shrink-0" />
+                            <span>Debita de:</span>
+                            <strong className="text-zinc-200 font-medium">
+                              {accounts.find(a => a.id === (bill.accountId || defaultDebitAccountId))?.name || 'Conta Principal (PicPay)'}
+                            </strong>
+                            {accounts.find(a => a.id === (bill.accountId || defaultDebitAccountId))?.isMain && (
+                              <span className="text-[9px] font-bold px-1 py-0.2 rounded-sm bg-lime-400/15 text-lime-400 border border-lime-400/30">
+                                Saldo Disponível
+                              </span>
+                            )}
                           </span>
                         </div>
                       </div>
@@ -1266,6 +1313,28 @@ export const BillsView: React.FC<BillsViewProps> = ({
                     </option>
                   ))}
                 </select>
+              </div>
+
+              {/* CONTA PARA DÉBITO AUTOMÁTICO */}
+              <div>
+                <label className="block text-xs font-semibold text-zinc-300 mb-1 flex items-center justify-between">
+                  <span>Debitar da Conta / Carteira</span>
+                  <span className="text-[10px] text-lime-400 font-normal">Debita automaticamente ao pagar</span>
+                </label>
+                <select
+                  value={accountId}
+                  onChange={e => setAccountId(e.target.value)}
+                  className="w-full bg-zinc-950 border border-zinc-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-hidden focus:border-lime-400"
+                >
+                  {accounts.filter(a => a.type !== 'credit').map(a => (
+                    <option key={a.id} value={a.id}>
+                      {a.name} ({a.institution}) {a.isMain ? '★ Principal (Saldo Disponível)' : ''}
+                    </option>
+                  ))}
+                </select>
+                <span className="text-[10px] text-zinc-500 mt-0.5 block">
+                  Ao pagar esta conta, o valor é debitado automaticamente do saldo da conta e do seu Saldo Disponível.
+                </span>
               </div>
 
               {/* ANOTAÇÕES */}

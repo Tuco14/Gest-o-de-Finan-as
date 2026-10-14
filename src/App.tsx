@@ -335,6 +335,8 @@ export default function App() {
               billType: data.billType || (Number(data.totalInstallments) === 0 ? 'fixed' : 'installment'),
               lastPaidMonth: data.lastPaidMonth || '',
               iconName: data.iconName || '',
+              accountId: data.accountId || '',
+              transactionIds: Array.isArray(data.transactionIds) ? data.transactionIds : [],
             });
           });
           setBills(deduplicateById(cloudBills));
@@ -939,6 +941,28 @@ export default function App() {
     }
   };
 
+  // Helper para identificar a Conta Principal (ex: PicPay / Saldo Disponível)
+  const getMainBankAccountId = (accList: Account[]): string => {
+    const uniqueAccs = deduplicateById(accList);
+    const main = uniqueAccs.find(a => a.isMain);
+    if (main) return main.id;
+
+    const picpay = uniqueAccs.find(
+      a =>
+        (a.name && a.name.toLowerCase().includes('picpay')) ||
+        (a.institution && a.institution.toLowerCase().includes('picpay'))
+    );
+    if (picpay) return picpay.id;
+
+    const checking = uniqueAccs.find(a => a.type === 'checking');
+    if (checking) return checking.id;
+
+    const nonCredit = uniqueAccs.find(a => a.type !== 'credit');
+    if (nonCredit) return nonCredit.id;
+
+    return uniqueAccs[0]?.id || '';
+  };
+
   const handleAddBill = async (bill: PayableBill) => {
     const isFixed = bill.billType === 'fixed' || bill.totalInstallments === 0;
     const cleanBill: PayableBill = {
@@ -949,12 +973,14 @@ export default function App() {
       paidInstallments: Number(bill.paidInstallments) || 0,
       dueDate: bill.dueDate,
       category: bill.category || '',
+      accountId: bill.accountId || getMainBankAccountId(accountsWithLiveBalances),
       notes: bill.notes || '',
       color: bill.color || '',
       createdAt: bill.createdAt || new Date().toISOString(),
       billType: isFixed ? 'fixed' : 'installment',
       lastPaidMonth: bill.lastPaidMonth || '',
       iconName: bill.iconName || '',
+      transactionIds: bill.transactionIds || [],
     };
 
     // Atualiza estado local de forma estritamente deduplicada por ID
@@ -986,10 +1012,12 @@ export default function App() {
       totalInstallments: isFixed ? 0 : (Number(bill.totalInstallments) || 1),
       paidInstallments: Number(bill.paidInstallments) || 0,
       category: bill.category || '',
+      accountId: bill.accountId || getMainBankAccountId(accountsWithLiveBalances),
       notes: bill.notes || '',
       billType: isFixed ? 'fixed' : 'installment',
       lastPaidMonth: bill.lastPaidMonth || '',
       iconName: bill.iconName || '',
+      transactionIds: bill.transactionIds || [],
     };
 
     if (currentUser) {
@@ -1041,54 +1069,60 @@ export default function App() {
     showToast(`Conta "${bill?.name || 'selecionada'}" excluída com sucesso!`);
   };
 
-  const handlePayInstallment = async (id: string) => {
+  const handlePayInstallment = async (id: string, customAccountId?: string) => {
     const bill = bills.find(b => b.id === id);
     if (!bill) return;
 
-    // Caso seja uma Conta Fixa Mensal (ex: Água, Luz, Celular)
-    if (bill.billType === 'fixed' || bill.totalInstallments === 0) {
-      const nextDueDate = addMonthsToDate(bill.dueDate, 1);
-      const updated: PayableBill = {
-        ...bill,
-        billType: 'fixed',
-        lastPaidMonth: currentMonth,
-        paidInstallments: (bill.paidInstallments || 0) + 1,
-        dueDate: nextDueDate,
-        category: bill.category || '',
-        notes: bill.notes || '',
-        iconName: bill.iconName || '',
-      };
+    const isFixed = bill.billType === 'fixed' || bill.totalInstallments === 0;
+    if (!isFixed && bill.paidInstallments >= bill.totalInstallments) return;
 
-      if (currentUser) {
-        try {
-          await setDoc(doc(db, 'payable_bills', id), {
-            ...updated,
-            userId: currentUser.uid,
-            updatedAt: new Date().toISOString(),
-          });
-        } catch (err) {
-          console.error('Erro ao pagar conta fixa no Firestore:', err);
-        }
-      }
+    // Determina a conta de onde o valor será debitado:
+    // Prioriza customAccountId ou bill.accountId, ou por padrão a Conta Principal (PicPay / Saldo Disponível)
+    const targetAccountId = customAccountId || bill.accountId || getMainBankAccountId(accountsWithLiveBalances);
+    const targetAccount = accountsWithLiveBalances.find(a => a.id === targetAccountId) || accountsWithLiveBalances[0];
+    const amount = Number(bill.installmentAmount) || 0;
+    const today = new Date().toISOString().split('T')[0];
 
-      setBills(prev => prev.map(b => (b.id === id ? updated : b)));
-      showToast(`Conta fixa "${bill.name}" marcada como paga para este mês! Vencimento avançado.`);
-      return;
-    }
-
-    // Caso seja parcelamento / financiamento
-    if (bill.paidInstallments >= bill.totalInstallments) return;
-
-    const nextPaid = bill.paidInstallments + 1;
+    const nextPaid = (bill.paidInstallments || 0) + 1;
     const nextDueDate = addMonthsToDate(bill.dueDate, 1);
+
+    // Cria a transação de despesa PAGA que debita imediatamente do saldo da conta e do Saldo Disponível
+    const txId = `tx-bill-${bill.id}-${Date.now()}-${generateId()}`;
+    const txDescription = isFixed
+      ? `Conta Fixa: ${bill.name}`
+      : `Parcela ${nextPaid}/${bill.totalInstallments}: ${bill.name}`;
+
+    const newTx: Transaction = {
+      id: txId,
+      description: txDescription,
+      amount: amount,
+      type: 'expense',
+      category: bill.category || categories.find(c => c.name.toLowerCase().includes('moradia') || c.type === 'expense')?.id || categories[0]?.id || 'cat-moradia',
+      date: today,
+      status: 'paid',
+      accountId: targetAccount ? targetAccount.id : targetAccountId,
+      paymentMethod: 'Pix',
+      notes: `Débito automático de conta a pagar: ${bill.name}`,
+      createdAt: new Date().toISOString(),
+    };
+
+    const nextTxs = [newTx, ...transactions];
+    setTransactions(nextTxs);
+
     const updated: PayableBill = {
       ...bill,
+      billType: isFixed ? 'fixed' : 'installment',
+      accountId: targetAccount ? targetAccount.id : bill.accountId,
+      lastPaidMonth: isFixed ? currentMonth : (bill.lastPaidMonth || ''),
       paidInstallments: nextPaid,
       dueDate: nextDueDate,
       category: bill.category || '',
       notes: bill.notes || '',
-      billType: 'installment',
+      iconName: bill.iconName || '',
+      transactionIds: [...(bill.transactionIds || []), newTx.id],
     };
+
+    setBills(prev => prev.map(b => (b.id === id ? updated : b)));
 
     if (currentUser) {
       try {
@@ -1097,63 +1131,80 @@ export default function App() {
           userId: currentUser.uid,
           updatedAt: new Date().toISOString(),
         });
+        await setDoc(doc(db, 'transactions', newTx.id), {
+          ...newTx,
+          userId: currentUser.uid,
+          updatedAt: new Date().toISOString(),
+        });
+        await syncAccountsToFirestore([newTx.accountId], nextTxs);
       } catch (err) {
-        console.error('Erro ao dar baixa em parcela no Firestore:', err);
+        console.error('Erro ao registrar pagamento e débito da conta no Firestore:', err);
       }
     }
 
-    setBills(prev => prev.map(b => (b.id === id ? updated : b)));
-    showToast(`Parcela ${nextPaid}/${bill.totalInstallments} de "${bill.name}" marcada como paga!`);
+    if (isFixed) {
+      showToast(`Conta fixa "${bill.name}" paga! ${formatCurrency(amount)} debitado de ${targetAccount?.name || 'sua conta'}.`);
+    } else {
+      showToast(`Parcela ${nextPaid}/${bill.totalInstallments} de "${bill.name}" paga! ${formatCurrency(amount)} debitado de ${targetAccount?.name || 'sua conta'}.`);
+    }
   };
 
   const handleRevertInstallment = async (id: string) => {
     const bill = bills.find(b => b.id === id);
     if (!bill) return;
 
-    // Caso seja uma Conta Fixa Mensal
-    if (bill.billType === 'fixed' || bill.totalInstallments === 0) {
-      const prevDueDate = addMonthsToDate(bill.dueDate, -1);
-      const updated: PayableBill = {
-        ...bill,
-        billType: 'fixed',
-        lastPaidMonth: '',
-        paidInstallments: Math.max(0, (bill.paidInstallments || 1) - 1),
-        dueDate: prevDueDate,
-        category: bill.category || '',
-        notes: bill.notes || '',
-        iconName: bill.iconName || '',
-      };
+    const isFixed = bill.billType === 'fixed' || bill.totalInstallments === 0;
+    if (!isFixed && bill.paidInstallments <= 0) return;
+
+    // Encontra a última transação criada para esta conta a pagar
+    const txIds = bill.transactionIds || [];
+    let lastTxId = txIds.length > 0 ? txIds[txIds.length - 1] : undefined;
+
+    if (!lastTxId) {
+      const match = transactions.find(t =>
+        t.id.startsWith(`tx-bill-${bill.id}`) ||
+        (t.notes && t.notes.includes(bill.name))
+      );
+      if (match) lastTxId = match.id;
+    }
+
+    let affectedAccountId: string | undefined;
+    let nextTxs = transactions;
+
+    if (lastTxId) {
+      const txToRemove = transactions.find(t => t.id === lastTxId);
+      if (txToRemove) {
+        affectedAccountId = txToRemove.accountId;
+      }
+      nextTxs = transactions.filter(t => t.id !== lastTxId);
+      setTransactions(nextTxs);
 
       if (currentUser) {
         try {
-          await setDoc(doc(db, 'payable_bills', id), {
-            ...updated,
-            userId: currentUser.uid,
-            updatedAt: new Date().toISOString(),
-          });
+          await deleteDoc(doc(db, 'transactions', lastTxId));
         } catch (err) {
-          console.error('Erro ao reverter conta fixa no Firestore:', err);
+          console.error('Erro ao excluir transação estornada no Firestore:', err);
         }
       }
-
-      setBills(prev => prev.map(b => (b.id === id ? updated : b)));
-      showToast(`Pagamento da conta fixa "${bill.name}" revertido para pendente.`);
-      return;
     }
 
-    // Caso seja parcelamento
-    if (bill.paidInstallments <= 0) return;
-
-    const prevPaid = bill.paidInstallments - 1;
+    const updatedTxIds = txIds.filter(tid => tid !== lastTxId);
     const prevDueDate = addMonthsToDate(bill.dueDate, -1);
+    const prevPaid = Math.max(0, (bill.paidInstallments || 1) - 1);
+
     const updated: PayableBill = {
       ...bill,
+      billType: isFixed ? 'fixed' : 'installment',
+      lastPaidMonth: isFixed ? '' : (bill.lastPaidMonth || ''),
       paidInstallments: prevPaid,
       dueDate: prevDueDate,
       category: bill.category || '',
       notes: bill.notes || '',
-      billType: 'installment',
+      iconName: bill.iconName || '',
+      transactionIds: updatedTxIds,
     };
+
+    setBills(prev => prev.map(b => (b.id === id ? updated : b)));
 
     if (currentUser) {
       try {
@@ -1162,25 +1213,59 @@ export default function App() {
           userId: currentUser.uid,
           updatedAt: new Date().toISOString(),
         });
+        if (affectedAccountId) {
+          await syncAccountsToFirestore([affectedAccountId], nextTxs);
+        }
       } catch (err) {
-        console.error('Erro ao reverter parcela no Firestore:', err);
+        console.error('Erro ao reverter conta no Firestore:', err);
       }
     }
 
-    setBills(prev => prev.map(b => (b.id === id ? updated : b)));
-    showToast(`Parcela desfeita para ${prevPaid}/${bill.totalInstallments}`);
+    if (isFixed) {
+      showToast(`Pagamento da conta fixa "${bill.name}" revertido e saldo estornado.`);
+    } else {
+      showToast(`Parcela desfeita para ${prevPaid}/${bill.totalInstallments} e saldo estornado.`);
+    }
   };
 
-  const handlePayoffBill = async (id: string) => {
+  const handlePayoffBill = async (id: string, customAccountId?: string) => {
     const bill = bills.find(b => b.id === id);
     if (!bill) return;
+
+    const remainingInstallments = Math.max(0, bill.totalInstallments - (bill.paidInstallments || 0));
+    if (remainingInstallments <= 0) return;
+
+    const payoffTotal = remainingInstallments * bill.installmentAmount;
+    const targetAccountId = customAccountId || bill.accountId || getMainBankAccountId(accountsWithLiveBalances);
+    const targetAccount = accountsWithLiveBalances.find(a => a.id === targetAccountId) || accountsWithLiveBalances[0];
+
+    const txId = `tx-bill-${bill.id}-payoff-${Date.now()}-${generateId()}`;
+    const newTx: Transaction = {
+      id: txId,
+      description: `Quitação integral (${remainingInstallments}x): ${bill.name}`,
+      amount: payoffTotal,
+      type: 'expense',
+      category: bill.category || categories.find(c => c.name.toLowerCase().includes('moradia') || c.type === 'expense')?.id || categories[0]?.id || 'cat-moradia',
+      date: new Date().toISOString().split('T')[0],
+      status: 'paid',
+      accountId: targetAccount ? targetAccount.id : targetAccountId,
+      paymentMethod: 'Pix',
+      notes: `Quitação antecipada de ${remainingInstallments} parcelas de ${bill.name}`,
+      createdAt: new Date().toISOString(),
+    };
+
+    const nextTxs = [newTx, ...transactions];
+    setTransactions(nextTxs);
 
     const updated: PayableBill = {
       ...bill,
       paidInstallments: bill.totalInstallments,
       category: bill.category || '',
       notes: bill.notes || '',
+      transactionIds: [...(bill.transactionIds || []), newTx.id],
     };
+
+    setBills(prev => prev.map(b => (b.id === id ? updated : b)));
 
     if (currentUser) {
       try {
@@ -1189,13 +1274,18 @@ export default function App() {
           userId: currentUser.uid,
           updatedAt: new Date().toISOString(),
         });
+        await setDoc(doc(db, 'transactions', newTx.id), {
+          ...newTx,
+          userId: currentUser.uid,
+          updatedAt: new Date().toISOString(),
+        });
+        await syncAccountsToFirestore([newTx.accountId], nextTxs);
       } catch (err) {
         console.error('Erro ao quitar conta no Firestore:', err);
       }
     }
 
-    setBills(prev => prev.map(b => (b.id === id ? updated : b)));
-    showToast(`Conta "${bill.name}" quitada integralmente! Parabéns! 🎉`);
+    showToast(`Conta "${bill.name}" quitada integralmente! ${formatCurrency(payoffTotal)} debitado de ${targetAccount?.name || 'sua conta'}.`);
   };
 
   // Reset para dados zerados (acionado via modal de confirmação)
@@ -1375,6 +1465,7 @@ export default function App() {
             <BillsView
               bills={bills}
               categories={categories}
+              accounts={accountsWithLiveBalances}
               privacyMode={privacyMode}
               currentMonth={currentMonth}
               onAddBill={handleAddBill}

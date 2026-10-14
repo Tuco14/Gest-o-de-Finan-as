@@ -51,6 +51,7 @@ export interface PayableBill {
   id: string;
   name: string;
   category?: string;
+  accountId?: string; // Conta de onde a conta será debitada (padrão: conta principal / PicPay)
   totalInstallments: number;
   paidInstallments: number;
   installmentAmount: number;
@@ -61,6 +62,7 @@ export interface PayableBill {
   billType?: 'installment' | 'fixed'; // 'fixed' = conta fixa recorrente (água, luz, celular, etc.), 'installment' = parcelamento/financiamento
   lastPaidMonth?: string; // YYYY-MM do mês em que foi paga pela última vez
   iconName?: string; // Droplets, Zap, Smartphone, Wifi, Home, Tv, etc.
+  transactionIds?: string[]; // IDs das transações de despesa geradas pelos pagamentos para permitir estorno
 }
 
 export interface FilterOptions {
