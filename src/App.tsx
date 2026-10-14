@@ -246,6 +246,8 @@ export default function App() {
               institution: data.institution,
               type: data.type,
               balance: Number(data.balance) || 0,
+              initialBalance: data.initialBalance !== undefined ? Number(data.initialBalance) : undefined,
+              isMain: !!data.isMain,
               color: data.color,
               iconName: data.iconName,
             });
@@ -363,10 +365,6 @@ export default function App() {
   }, [categories]);
 
   useEffect(() => {
-    localStorage.setItem('fincontrol_accounts', JSON.stringify(accounts));
-  }, [accounts]);
-
-  useEffect(() => {
     localStorage.setItem('fincontrol_goals', JSON.stringify(goals));
   }, [goals]);
 
@@ -386,7 +384,40 @@ export default function App() {
     }, 3200);
   };
 
-  // Totais do mês ativo
+  // Cálculo em tempo real dos saldos das contas e carteiras
+  // O saldo atual de cada conta reflete o saldo base (inicial) somado às receitas pagas e subtraído das despesas pagas
+  const accountsWithLiveBalances = useMemo(() => {
+    const uniqueAccs = deduplicateById(accounts);
+
+    return uniqueAccs.map(acc => {
+      const baseBalance = typeof acc.initialBalance === 'number'
+        ? acc.initialBalance
+        : (typeof acc.balance === 'number' ? acc.balance : 0);
+
+      // Soma movimentações efetivadas desta conta: receitas entram (+), despesas saem (-)
+      const txDelta = transactions
+        .filter(t => t && t.accountId === acc.id && t.status === 'paid')
+        .reduce((sum, t) => {
+          const val = Number(t.amount) || 0;
+          return sum + (t.type === 'income' ? val : -val);
+        }, 0);
+
+      const liveBalance = Math.round((baseBalance + txDelta) * 100) / 100;
+
+      return {
+        ...acc,
+        initialBalance: baseBalance,
+        balance: liveBalance,
+      };
+    });
+  }, [accounts, transactions]);
+
+  // Persiste contas com saldos calculados no localStorage
+  useEffect(() => {
+    localStorage.setItem('fincontrol_accounts', JSON.stringify(accountsWithLiveBalances));
+  }, [accountsWithLiveBalances]);
+
+  // Totais do mês ativo e Saldo Disponível atualizado
   const monthlyMetrics = useMemo(() => {
     let totalIncome = 0;
     let pendingIncome = 0;
@@ -409,24 +440,35 @@ export default function App() {
       }
     });
 
-    const uniqueAccounts = deduplicateById(accounts);
-    // Saldo da conta do banco (apenas contas bancárias do tipo 'checking')
-    const bankAccounts = uniqueAccounts.filter(a => a.type === 'checking');
-    
-    // Se houver contas do tipo 'checking', puxa estritamente delas
-    // Caso contrário, busca contas que não sejam carteira física ('cash') e nem cartão de crédito ('credit')
-    const targetAccounts = bankAccounts.length > 0 
-      ? bankAccounts 
-      : uniqueAccounts.filter(a => a.type !== 'credit' && a.type !== 'cash');
+    const uniqueAccounts = deduplicateById(accountsWithLiveBalances);
+    // Saldo disponível engloba EXCLUSIVAMENTE a conta principal no banco (ex: PicPay / Conta Corrente)
+    // Conforme solicitado: outros saldos (poupança, investimentos, dinheiro físico, cartões) são à parte e exibidos em Contas & Carteiras
+    let mainBankAccounts = uniqueAccounts.filter(a => a.isMain);
 
-    const totalBalance = targetAccounts.length > 0 
-      ? targetAccounts.reduce((sum, a) => sum + a.balance, 0)
-      : (uniqueAccounts.length > 0 ? uniqueAccounts[0].balance : 0);
+    // Se nenhuma estiver com isMain explícito, prioriza conta com "picpay" no nome ou instituição
+    if (mainBankAccounts.length === 0) {
+      mainBankAccounts = uniqueAccounts.filter(a => 
+        (a.name && a.name.toLowerCase().includes('picpay')) || 
+        (a.institution && a.institution.toLowerCase().includes('picpay'))
+      );
+    }
+
+    // Se ainda não achou PicPay, busca contas do tipo 'checking' (Conta Corrente / Digital bancária)
+    if (mainBankAccounts.length === 0) {
+      mainBankAccounts = uniqueAccounts.filter(a => a.type === 'checking');
+    }
+
+    // Fallback: se não houver checking/picpay, usa apenas a primeira conta não-crédito
+    const targetAccounts = mainBankAccounts.length > 0 
+      ? mainBankAccounts 
+      : (uniqueAccounts.filter(a => a.type !== 'credit').slice(0, 1));
+
+    const totalBalance = targetAccounts.reduce((sum, a) => sum + (Number(a.balance) || 0), 0);
 
     const bankAccountName = targetAccounts.length === 1 
       ? targetAccounts[0].name 
       : targetAccounts.length > 1 
-      ? `${targetAccounts.length} contas bancárias` 
+      ? targetAccounts.map(a => a.name).join(' + ') 
       : undefined;
 
     return {
@@ -437,7 +479,37 @@ export default function App() {
       totalExpense,
       pendingExpense,
     };
-  }, [transactions, accounts, currentMonth]);
+  }, [transactions, accountsWithLiveBalances, currentMonth]);
+
+  // Sincroniza o saldo calculado das contas no Firestore para persistência em nuvem
+  const syncAccountsToFirestore = async (affectedAccIds: string[], nextTxs: Transaction[]) => {
+    if (!currentUser || affectedAccIds.length === 0) return;
+    try {
+      for (const accId of affectedAccIds) {
+        const acc = accounts.find(a => a.id === accId);
+        if (acc) {
+          const baseBal = typeof acc.initialBalance === 'number' ? acc.initialBalance : (Number(acc.balance) || 0);
+          const txDelta = nextTxs
+            .filter(t => t && t.accountId === accId && t.status === 'paid')
+            .reduce((sum, t) => {
+              const val = Number(t.amount) || 0;
+              return sum + (t.type === 'income' ? val : -val);
+            }, 0);
+          const liveBal = Math.round((baseBal + txDelta) * 100) / 100;
+
+          await setDoc(doc(db, 'accounts', accId), {
+            ...acc,
+            balance: liveBal,
+            initialBalance: baseBal,
+            userId: currentUser.uid,
+            updatedAt: new Date().toISOString(),
+          }, { merge: true });
+        }
+      }
+    } catch (err) {
+      console.error('Erro ao sincronizar saldo de conta no Firestore:', err);
+    }
+  };
 
   // Handlers para Transações
   const handleOpenNewTransaction = (type: TransactionType = 'expense') => {
@@ -452,11 +524,8 @@ export default function App() {
   };
 
   const handleSaveTransaction = async (tx: Transaction) => {
-    // Atualização estritamente deduplicada por ID (imune a double calls e StrictMode)
-    setTransactions(prev => {
-      const filtered = prev.filter(t => t.id !== tx.id);
-      return [tx, ...filtered];
-    });
+    const nextTxs = [tx, ...transactions.filter(t => t.id !== tx.id)];
+    setTransactions(nextTxs);
 
     if (currentUser) {
       try {
@@ -468,6 +537,12 @@ export default function App() {
       } catch (err) {
         console.error('Erro ao salvar no Firestore:', err);
       }
+
+      const affectedIds = [tx.accountId];
+      if (editingTransaction && editingTransaction.accountId && editingTransaction.accountId !== tx.accountId) {
+        affectedIds.push(editingTransaction.accountId);
+      }
+      await syncAccountsToFirestore(affectedIds, nextTxs);
     }
 
     if (editingTransaction) {
@@ -478,15 +553,21 @@ export default function App() {
   };
 
   const handleDeleteTransaction = async (id: string) => {
+    const txToDelete = transactions.find(t => t.id === id);
     if (confirm('Deseja realmente excluir este lançamento?')) {
+      const nextTxs = transactions.filter(t => t.id !== id);
+      setTransactions(nextTxs);
+
       if (currentUser) {
         try {
           await deleteDoc(doc(db, 'transactions', id));
         } catch (err) {
           console.error('Erro ao excluir no Firestore:', err);
         }
+        if (txToDelete) {
+          await syncAccountsToFirestore([txToDelete.accountId], nextTxs);
+        }
       }
-      setTransactions(prev => prev.filter(t => t.id !== id));
       showToast('Transação excluída');
     }
   };
@@ -495,6 +576,8 @@ export default function App() {
     const tx = transactions.find(t => t.id === id);
     if (!tx) return;
     const nextStatus = tx.status === 'paid' ? 'pending' : 'paid';
+    const nextTxs = transactions.map(t => (t.id === id ? { ...t, status: nextStatus } : t));
+    setTransactions(nextTxs);
 
     if (currentUser) {
       try {
@@ -506,16 +589,9 @@ export default function App() {
       } catch (err) {
         console.error('Erro ao atualizar status no Firestore:', err);
       }
+      await syncAccountsToFirestore([tx.accountId], nextTxs);
     }
 
-    setTransactions(prev =>
-      prev.map(t => {
-        if (t.id === id) {
-          return { ...t, status: nextStatus };
-        }
-        return t;
-      })
-    );
     showToast('Status da transação alterado');
   };
 
@@ -523,6 +599,8 @@ export default function App() {
   const handleBulkMarkPaid = async (ids: string[]) => {
     if (ids.length === 0) return;
     const idSet = new Set(ids);
+    const nextTxs = transactions.map(t => (idSet.has(t.id) ? { ...t, status: 'paid' as const } : t));
+    setTransactions(nextTxs);
 
     if (currentUser) {
       try {
@@ -541,17 +619,22 @@ export default function App() {
       } catch (err) {
         console.error('Erro na atualização em massa:', err);
       }
+
+      const affectedIds = Array.from(new Set(ids.map(id => transactions.find(t => t.id === id)?.accountId).filter(Boolean) as string[]));
+      await syncAccountsToFirestore(affectedIds, nextTxs);
     }
 
-    setTransactions(prev =>
-      prev.map(t => (idSet.has(t.id) ? { ...t, status: 'paid' as const } : t))
-    );
     showToast(`${ids.length} ${ids.length === 1 ? 'lançamento marcado' : 'lançamentos marcados'} como pago!`);
   };
 
   const handleBulkDelete = async (ids: string[]) => {
     if (ids.length === 0) return;
     if (confirm(`Atenção: deseja realmente excluir os ${ids.length} lançamentos selecionados?`)) {
+      const idSet = new Set(ids);
+      const affectedIds = Array.from(new Set(ids.map(id => transactions.find(t => t.id === id)?.accountId).filter(Boolean) as string[]));
+      const nextTxs = transactions.filter(t => !idSet.has(t.id));
+      setTransactions(nextTxs);
+
       if (currentUser) {
         try {
           const batch = writeBatch(db);
@@ -562,9 +645,9 @@ export default function App() {
         } catch (err) {
           console.error('Erro na exclusão em massa:', err);
         }
+        await syncAccountsToFirestore(affectedIds, nextTxs);
       }
-      const idSet = new Set(ids);
-      setTransactions(prev => prev.filter(t => !idSet.has(t.id)));
+
       showToast(`${ids.length} ${ids.length === 1 ? 'lançamento excluído' : 'lançamentos excluídos'} com sucesso!`);
     }
   };
@@ -577,7 +660,8 @@ export default function App() {
       createdAt: new Date().toISOString(),
     };
 
-    setTransactions(prev => [duplicated, ...prev]);
+    const nextTxs = [duplicated, ...transactions];
+    setTransactions(nextTxs);
 
     if (currentUser) {
       try {
@@ -588,6 +672,10 @@ export default function App() {
         });
       } catch (err) {
         console.error('Erro ao duplicar transação no Firestore:', err);
+      }
+
+      if (duplicated.status === 'paid') {
+        await syncAccountsToFirestore([duplicated.accountId], nextTxs);
       }
     }
 
@@ -710,16 +798,20 @@ export default function App() {
 
   // Handlers para Contas
   const handleAddAccount = async (acc: Account) => {
-    // Atualiza estado local de forma estritamente deduplicada por ID (imune a re-execuções e StrictMode)
+    const accWithInitial: Account = {
+      ...acc,
+      initialBalance: typeof acc.initialBalance === 'number' ? acc.initialBalance : (Number(acc.balance) || 0),
+    };
+
     setAccounts(prev => {
       const filtered = prev.filter(a => a.id !== acc.id);
-      return [...filtered, acc];
+      return [...filtered, accWithInitial];
     });
 
     if (currentUser) {
       try {
         await setDoc(doc(db, 'accounts', acc.id), {
-          ...acc,
+          ...accWithInitial,
           userId: currentUser.uid,
           updatedAt: new Date().toISOString(),
         });
@@ -745,28 +837,68 @@ export default function App() {
   };
 
   const handleUpdateBalance = async (accId: string, newBalance: number) => {
+    // Calcula o impacto das transações pagas atuais para definir com precisão o novo saldo base
+    const txDelta = transactions
+      .filter(t => t && t.accountId === accId && t.status === 'paid')
+      .reduce((sum, t) => {
+        const val = Number(t.amount) || 0;
+        return sum + (t.type === 'income' ? val : -val);
+      }, 0);
+
+    const newInitialBalance = Math.round((newBalance - txDelta) * 100) / 100;
+
     const acc = accounts.find(a => a.id === accId);
     if (acc && currentUser) {
       try {
         await setDoc(doc(db, 'accounts', accId), {
           ...acc,
           balance: newBalance,
+          initialBalance: newInitialBalance,
           userId: currentUser.uid,
+          updatedAt: new Date().toISOString(),
         });
       } catch (err) {
         console.error('Erro ao atualizar saldo no Firestore:', err);
       }
     }
+
     setAccounts(prev =>
-      prev.map(a => (a.id === accId ? { ...a, balance: newBalance } : a))
+      prev.map(a => (a.id === accId ? { ...a, balance: newBalance, initialBalance: newInitialBalance } : a))
     );
     showToast('Saldo da conta ajustado!');
+  };
+
+  const handleSetMainAccount = async (accId: string) => {
+    setAccounts(prev =>
+      prev.map(a => ({
+        ...a,
+        isMain: a.id === accId,
+      }))
+    );
+
+    if (currentUser) {
+      try {
+        for (const a of accounts) {
+          const isThisMain = a.id === accId;
+          await setDoc(doc(db, 'accounts', a.id), {
+            ...a,
+            isMain: isThisMain,
+            userId: currentUser.uid,
+            updatedAt: new Date().toISOString(),
+          }, { merge: true });
+        }
+      } catch (err) {
+        console.error('Erro ao salvar conta principal no Firestore:', err);
+      }
+    }
+    const acc = accounts.find(a => a.id === accId);
+    showToast(`"${acc?.name || 'Conta'}" definida como principal para o Saldo Disponível!`);
   };
 
   // Exportar para CSV
   const handleExportCSV = () => {
     const catMap = new Map(categories.map(c => [c.id, c.name]));
-    const accMap = new Map(accounts.map(a => [a.id, a.name]));
+    const accMap = new Map(accountsWithLiveBalances.map(a => [a.id, a.name]));
 
     const headers = ['Data', 'Descricao', 'Tipo', 'Categoria', 'Valor (R$)', 'Status', 'Conta', 'Metodo', 'Anotacoes'];
     const rows = transactions.map(t => [
@@ -1166,11 +1298,12 @@ export default function App() {
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
               <div className="lg:col-span-7">
                 <AccountsSummary
-                  accounts={accounts}
+                  accounts={accountsWithLiveBalances}
                   privacyMode={privacyMode}
                   onAddAccount={handleAddAccount}
                   onUpdateBalance={handleUpdateBalance}
                   onDeleteAccount={handleDeleteAccount}
+                  onSetMainAccount={handleSetMainAccount}
                 />
               </div>
               <div className="lg:col-span-5">
@@ -1192,7 +1325,7 @@ export default function App() {
             <TransactionList
               transactions={transactions.filter(t => t.date.startsWith(currentMonth))}
               categories={categories}
-              accounts={accounts}
+              accounts={accountsWithLiveBalances}
               privacyMode={privacyMode}
               onEdit={handleEditTransaction}
               onDelete={handleDeleteTransaction}
@@ -1303,7 +1436,7 @@ export default function App() {
         }}
         onSave={handleSaveTransaction}
         categories={categories}
-        accounts={accounts}
+        accounts={accountsWithLiveBalances}
         editingTransaction={editingTransaction}
         initialType={modalInitialType}
         currentMonth={currentMonth}
@@ -1328,7 +1461,7 @@ export default function App() {
         onClose={() => setIsReportModalOpen(false)}
         currentMonth={currentMonth}
         transactions={transactions}
-        accounts={accounts}
+        accounts={accountsWithLiveBalances}
         categories={categories}
         goals={goals}
         userEmail={currentUser?.email || localUser?.email}

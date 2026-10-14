@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Account } from '../types';
 import { formatCurrency, generateId, deduplicateById } from '../utils/formatters';
 import { CategoryIcon } from './CategoryIcon';
-import { Landmark, Plus, CreditCard, Wallet, ShieldCheck, Edit3, Trash2 } from 'lucide-react';
+import { Landmark, Plus, CreditCard, Wallet, ShieldCheck, Edit3, Trash2, Star } from 'lucide-react';
 
 interface AccountsSummaryProps {
   accounts: Account[];
@@ -10,6 +10,7 @@ interface AccountsSummaryProps {
   onAddAccount: (account: Account) => void;
   onUpdateBalance: (accountId: string, newBalance: number) => void;
   onDeleteAccount: (accountId: string) => void;
+  onSetMainAccount?: (accountId: string) => void;
 }
 
 export const AccountsSummary: React.FC<AccountsSummaryProps> = ({
@@ -18,6 +19,7 @@ export const AccountsSummary: React.FC<AccountsSummaryProps> = ({
   onAddAccount,
   onUpdateBalance,
   onDeleteAccount,
+  onSetMainAccount,
 }) => {
   const [isAdding, setIsAdding] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -25,12 +27,29 @@ export const AccountsSummary: React.FC<AccountsSummaryProps> = ({
   const [institution, setInstitution] = useState('');
   const [type, setType] = useState<Account['type']>('checking');
   const [balance, setBalance] = useState('');
+  const [isMainAccount, setIsMainAccount] = useState(false);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editBalanceVal, setEditBalanceVal] = useState('');
   const [accountToDelete, setAccountToDelete] = useState<Account | null>(null);
 
   const uniqueAccounts = useMemo(() => deduplicateById(accounts), [accounts]);
+  const totalConsolidated = useMemo(() => uniqueAccounts.reduce((sum, a) => sum + (Number(a.balance) || 0), 0), [uniqueAccounts]);
+
+  // Identifica a conta bancária principal ativa que compõe o Saldo Disponível
+  const activeMainAccountId = useMemo(() => {
+    const explicit = uniqueAccounts.find(a => a.isMain);
+    if (explicit) return explicit.id;
+    const picpay = uniqueAccounts.find(a => 
+      (a.name && a.name.toLowerCase().includes('picpay')) || 
+      (a.institution && a.institution.toLowerCase().includes('picpay'))
+    );
+    if (picpay) return picpay.id;
+    const checking = uniqueAccounts.find(a => a.type === 'checking');
+    if (checking) return checking.id;
+    const nonCredit = uniqueAccounts.find(a => a.type !== 'credit');
+    return nonCredit ? nonCredit.id : uniqueAccounts[0]?.id;
+  }, [uniqueAccounts]);
 
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
@@ -47,6 +66,8 @@ export const AccountsSummary: React.FC<AccountsSummaryProps> = ({
       institution: institution.trim() || name.trim(),
       type,
       balance: num,
+      initialBalance: num,
+      isMain: isMainAccount || (type === 'checking' && uniqueAccounts.filter(a => a.isMain).length === 0),
       color: type === 'credit' ? '#1E293B' : type === 'investment' ? '#059669' : '#6366F1',
       iconName: type === 'credit' ? 'CreditCard' : type === 'investment' ? 'ShieldCheck' : 'Landmark',
     };
@@ -56,6 +77,7 @@ export const AccountsSummary: React.FC<AccountsSummaryProps> = ({
     setName('');
     setInstitution('');
     setBalance('');
+    setIsMainAccount(false);
     setTimeout(() => setIsSubmitting(false), 400);
   };
 
@@ -70,9 +92,15 @@ export const AccountsSummary: React.FC<AccountsSummaryProps> = ({
   return (
     <div className="bg-zinc-900 rounded-2xl p-5 border border-zinc-800 shadow-md">
       <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2.5">
           <Landmark className="w-5 h-5 text-lime-400" />
-          <h3 className="font-bold text-white text-base">Contas & Carteiras</h3>
+          <div>
+            <h3 className="font-bold text-white text-base leading-tight">Contas & Carteiras</h3>
+            <span className="text-[11px] font-medium text-zinc-400">
+              Total consolidado: <span className={`font-bold ${totalConsolidated < 0 ? 'text-rose-400' : 'text-lime-400'}`}>{formatCurrency(totalConsolidated, privacyMode)}</span>
+              <span className="text-zinc-500 text-[10px] ml-1.5 hidden sm:inline">(Saldo no topo reflete a conta principal)</span>
+            </span>
+          </div>
         </div>
         <button
           onClick={() => setIsAdding(!isAdding)}
@@ -88,7 +116,7 @@ export const AccountsSummary: React.FC<AccountsSummaryProps> = ({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <input
               type="text"
-              placeholder="Nome da Conta (ex: Nubank Principal)"
+              placeholder="Nome da Conta (ex: PicPay, Nubank)"
               value={name}
               onChange={e => setName(e.target.value)}
               className="px-3 py-1.5 bg-zinc-900 border border-zinc-700 rounded-lg text-white placeholder-zinc-500 focus:outline-hidden focus:border-lime-400"
@@ -96,7 +124,7 @@ export const AccountsSummary: React.FC<AccountsSummaryProps> = ({
             />
             <input
               type="text"
-              placeholder="Instituição (ex: Nubank, Itaú, C6)"
+              placeholder="Instituição (ex: PicPay, Nubank, Itaú)"
               value={institution}
               onChange={e => setInstitution(e.target.value)}
               className="px-3 py-1.5 bg-zinc-900 border border-zinc-700 rounded-lg text-white placeholder-zinc-500 focus:outline-hidden focus:border-lime-400"
@@ -108,7 +136,7 @@ export const AccountsSummary: React.FC<AccountsSummaryProps> = ({
               onChange={e => setType(e.target.value as any)}
               className="px-3 py-1.5 bg-zinc-900 border border-zinc-700 rounded-lg text-white focus:outline-hidden focus:border-lime-400 cursor-pointer"
             >
-              <option value="checking">Conta Corrente / Digital</option>
+              <option value="checking">Conta Corrente / Digital (Banco)</option>
               <option value="credit">Cartão de Crédito</option>
               <option value="savings">Reserva / Poupança</option>
               <option value="investment">Investimentos</option>
@@ -123,6 +151,17 @@ export const AccountsSummary: React.FC<AccountsSummaryProps> = ({
               className="px-3 py-1.5 bg-zinc-900 border border-zinc-700 rounded-lg text-white placeholder-zinc-500 focus:outline-hidden focus:border-lime-400"
               required
             />
+          </div>
+          <div className="flex items-center gap-2 pt-0.5">
+            <label className="flex items-center gap-2 text-zinc-300 text-xs cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={isMainAccount}
+                onChange={e => setIsMainAccount(e.target.checked)}
+                className="rounded border-zinc-700 bg-zinc-900 text-lime-400 focus:ring-0 focus:ring-offset-0 cursor-pointer"
+              />
+              <span>Definir como Conta Principal no Banco (alimenta o Saldo Disponível)</span>
+            </label>
           </div>
           <div className="flex justify-end gap-2 pt-1">
             <button
@@ -217,6 +256,23 @@ export const AccountsSummary: React.FC<AccountsSummaryProps> = ({
                       <CategoryIcon name={acc.iconName} className="w-3.5 h-3.5" />
                     </span>
                     <div className="flex items-center gap-1">
+                      {onSetMainAccount && (
+                        <button
+                          onClick={() => onSetMainAccount(acc.id)}
+                          className={`p-1 rounded-md transition-colors cursor-pointer ${
+                            acc.id === activeMainAccountId 
+                              ? 'text-lime-400 bg-lime-400/15' 
+                              : 'text-zinc-500 hover:text-lime-400 hover:bg-zinc-800'
+                          }`}
+                          title={
+                            acc.id === activeMainAccountId 
+                              ? 'Conta Principal ativa (alimenta o Saldo Disponível)' 
+                              : 'Definir como Conta Principal no Banco para Saldo Disponível'
+                          }
+                        >
+                          <Star className={`w-3 h-3 ${acc.id === activeMainAccountId ? 'fill-lime-400' : ''}`} />
+                        </button>
+                      )}
                       <button
                         onClick={() => {
                           setEditingId(acc.id);
@@ -239,10 +295,16 @@ export const AccountsSummary: React.FC<AccountsSummaryProps> = ({
                   <h4 className="font-semibold text-white text-xs truncate">{acc.name}</h4>
                   <p className="text-[10px] text-zinc-400 truncate">{acc.institution}</p>
                   
-                  <div className="mt-1.5 flex items-center gap-1">
-                    {acc.type === 'checking' && (
-                      <span className="text-[9px] font-bold text-lime-400 bg-lime-400/10 px-1.5 py-0.5 rounded border border-lime-400/20">
-                        Conta do Banco
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                    {acc.id === activeMainAccountId && (
+                      <span className="text-[9px] font-bold text-lime-400 bg-lime-400/10 px-1.5 py-0.5 rounded border border-lime-400/30 flex items-center gap-0.5">
+                        <Star className="w-2.5 h-2.5 fill-lime-400" />
+                        Principal (Saldo)
+                      </span>
+                    )}
+                    {acc.type === 'checking' && acc.id !== activeMainAccountId && (
+                      <span className="text-[9px] font-medium text-zinc-400 bg-zinc-800 px-1.5 py-0.5 rounded">
+                        Conta Corrente
                       </span>
                     )}
                     {acc.type === 'cash' && (

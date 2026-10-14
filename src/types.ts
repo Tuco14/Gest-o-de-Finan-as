@@ -17,6 +17,8 @@ export interface Account {
   institution: string;
   type: 'checking' | 'credit' | 'savings' | 'investment' | 'cash';
   balance: number;
+  initialBalance?: number;
+  isMain?: boolean;
   color: string;
   iconName: string;
 }

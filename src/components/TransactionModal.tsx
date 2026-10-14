@@ -76,7 +76,12 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       const defaultCat = categories.find(c => c.type === initialType || c.type === 'both');
       setCategoryId(defaultCat ? defaultCat.id : categories[0]?.id || '');
       
-      setAccountId(accounts[0]?.id || '');
+      const preferredAccount = 
+        accounts.find(a => a.isMain) ||
+        accounts.find(a => (a.name && a.name.toLowerCase().includes('picpay')) || (a.institution && a.institution.toLowerCase().includes('picpay'))) ||
+        accounts.find(a => a.type === 'checking') ||
+        accounts[0];
+      setAccountId(preferredAccount?.id || '');
       
       // Default date to today or within current month
       const now = new Date();

@@ -48,9 +48,9 @@ export const MetricCards: React.FC<MetricCardsProps> = ({
             <span className="text-xs font-semibold text-zinc-400 tracking-wide uppercase">Saldo Disponível</span>
             <span 
               className="text-[11px] text-lime-400 font-medium truncate max-w-[170px]" 
-              title={bankAccountName ? `Conta Bancária: ${bankAccountName}` : 'Conta do Banco'}
+              title={bankAccountName ? `Conta: ${bankAccountName}` : 'Conta Principal'}
             >
-              {bankAccountName ? `Banco: ${bankAccountName}` : 'Conta do Banco'}
+              {bankAccountName ? (bankAccountName.toLowerCase().startsWith('conta') || bankAccountName.toLowerCase().startsWith('banco') ? bankAccountName : `Conta: ${bankAccountName}`) : 'Conta Principal'}
             </span>
           </div>
           <div className="w-8 h-8 rounded-xl bg-zinc-800 border border-zinc-700/80 flex items-center justify-center text-lime-400">

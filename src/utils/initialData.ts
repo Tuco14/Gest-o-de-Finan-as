@@ -19,10 +19,10 @@ export const INITIAL_CATEGORIES: Category[] = [
 ];
 
 export const INITIAL_ACCOUNTS: Account[] = [
-  { id: 'acc-corrente', name: 'Conta Corrente Principal', institution: 'Banco Principal', type: 'checking', balance: 0, color: '#3B82F6', iconName: 'Landmark' },
-  { id: 'acc-cartao', name: 'Cartão de Crédito', institution: 'Cartão', type: 'credit', balance: 0, color: '#6366F1', iconName: 'CreditCard' },
-  { id: 'acc-reserva', name: 'Reserva / Poupança', institution: 'Investimentos', type: 'savings', balance: 0, color: '#10B981', iconName: 'ShieldCheck' },
-  { id: 'acc-carteira', name: 'Carteira (Dinheiro Físico)', institution: 'Espécie', type: 'cash', balance: 0, color: '#64748B', iconName: 'Wallet' },
+  { id: 'acc-corrente', name: 'Conta Principal (PicPay)', institution: 'PicPay', type: 'checking', balance: 0, initialBalance: 0, isMain: true, color: '#10B981', iconName: 'Landmark' },
+  { id: 'acc-cartao', name: 'Cartão de Crédito', institution: 'Cartão', type: 'credit', balance: 0, initialBalance: 0, color: '#6366F1', iconName: 'CreditCard' },
+  { id: 'acc-reserva', name: 'Reserva / Poupança', institution: 'Investimentos', type: 'savings', balance: 0, initialBalance: 0, color: '#059669', iconName: 'ShieldCheck' },
+  { id: 'acc-carteira', name: 'Carteira (Dinheiro Físico)', institution: 'Espécie', type: 'cash', balance: 0, initialBalance: 0, color: '#64748B', iconName: 'Wallet' },
 ];
 
 export const INITIAL_GOALS: FinancialGoal[] = [];
