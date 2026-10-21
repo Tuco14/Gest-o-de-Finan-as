@@ -1,0 +1,5 @@
+{
+  "summary": "Relatório Técnico Completo de Auditoria de Segurança Fase 2 (SEC2) do FinControl, cobrindo integridade transacional, concorrência bancária, endurecimento de regras de Firestore, proteção de sessões locais e cabeçalhos defensivos.",
+  "updatedAt": "2026-10-14T13:01:14.263630285Z",
+  "userFacing": true
+}

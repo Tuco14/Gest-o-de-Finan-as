@@ -3,6 +3,64 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      (function() {
+        const _origConsoleError = console.error;
+        console.error = function(...args) {
+          if (args[0] && (
+            (typeof args[0] === 'string' && (args[0].includes('WebSocket closed without opened') || args[0].includes('[vite]'))) ||
+            (args[0] instanceof Error && args[0].message && args[0].message.includes('WebSocket'))
+          )) {
+            return;
+          }
+          _origConsoleError.apply(console, args);
+        };
+
+        const NativeWS = window.WebSocket;
+        if (NativeWS) {
+          window.WebSocket = function(url, protocols) {
+            const urlStr = String(url || '');
+            if (protocols === 'vite-hmr' || urlStr.includes('ais-dev') || urlStr.includes('@vite')) {
+              const listeners = {};
+              const dummy = {
+                url: urlStr,
+                readyState: 1,
+                bufferedAmount: 0,
+                extensions: '',
+                protocol: 'vite-hmr',
+                binaryType: 'blob',
+                addEventListener: function(type, fn) {
+                  listeners[type] = listeners[type] || [];
+                  listeners[type].push(fn);
+                  if (type === 'open') {
+                    setTimeout(() => fn({ type: 'open' }), 10);
+                  }
+                },
+                removeEventListener: function(type, fn) {
+                  if (listeners[type]) {
+                    listeners[type] = listeners[type].filter(f => f !== fn);
+                  }
+                },
+                dispatchEvent: function() { return true; },
+                send: function() {},
+                close: function() {},
+                onopen: null,
+                onclose: null,
+                onerror: null,
+                onmessage: null,
+              };
+              return dummy;
+            }
+            return new NativeWS(url, protocols);
+          };
+          window.WebSocket.prototype = NativeWS.prototype;
+          window.WebSocket.CONNECTING = 0;
+          window.WebSocket.OPEN = 1;
+          window.WebSocket.CLOSING = 2;
+          window.WebSocket.CLOSED = 3;
+        }
+      })();
+    </script>
     <title>FinControl - Gestão Financeira</title>
     <meta name="description" content="SaaS completo de controle financeiro pessoal e empresarial com gráficos interativos, fluxo de caixa, orçamentos e relatórios." />
     <meta property="og:title" content="FinControl - Gestão Financeira" />

@@ -33,7 +33,8 @@ import {
   Plus, 
   FileSpreadsheet, 
   Sparkles, 
-  Shield 
+  Shield,
+  Bot
 } from 'lucide-react';
 import { 
   auth, 
@@ -52,6 +53,7 @@ import {
 } from './lib/firebase';
 import { AuthModal } from './components/AuthModal';
 import { MonthlyReportModal } from './components/MonthlyReportModal';
+import { AIChatModal } from './components/AIChatModal';
 
 const APP_STORAGE_VERSION = 'fincontrol_v2_zeroed';
 
@@ -159,6 +161,7 @@ export default function App() {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [isReportModalOpen, setIsReportModalOpen] = useState<boolean>(false);
+  const [isAIChatOpen, setIsAIChatOpen] = useState<boolean>(false);
 
   const handleSaveLocalUser = (name: string, email: string) => {
     const userObj = { name, email };
@@ -1564,6 +1567,29 @@ export default function App() {
         isOpen={isResetModalOpen}
         onClose={() => setIsResetModalOpen(false)}
         onConfirm={handleConfirmReset}
+      />
+
+      {/* Assistente Financeiro IA (FinBot AI) com transformação fluida */}
+      <AIChatModal
+        isOpen={isAIChatOpen}
+        onOpen={() => setIsAIChatOpen(true)}
+        onClose={() => setIsAIChatOpen(false)}
+        availableBalance={monthlyMetrics.totalBalance}
+        totalBalance={accountsWithLiveBalances.reduce((sum, a) => sum + (Number(a.balance) || 0), 0)}
+        accounts={accountsWithLiveBalances}
+        currentMonth={currentMonth}
+        monthlyMetrics={{
+          totalIncome: monthlyMetrics.totalIncome,
+          paidIncome: monthlyMetrics.totalIncome - monthlyMetrics.pendingIncome,
+          pendingIncome: monthlyMetrics.pendingIncome,
+          totalExpense: monthlyMetrics.totalExpense,
+          paidExpense: monthlyMetrics.totalExpense - monthlyMetrics.pendingExpense,
+          pendingExpense: monthlyMetrics.pendingExpense,
+        }}
+        bills={bills}
+        goals={goals}
+        recentTransactions={transactions}
+        userEmail={currentUser?.email || localUser?.email}
       />
     </div>
   );
