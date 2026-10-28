@@ -78,11 +78,23 @@ export default defineConfig(() => {
           ],
         },
         devOptions: {
-          enabled: true,
-          type: 'module',
+          enabled: false,
         },
       }),
     ],
+    build: {
+      chunkSizeWarningLimit: 3500,
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            three: ['three'],
+            vendor: ['react', 'react-dom', 'lucide-react', 'motion'],
+            pdf: ['jspdf', 'html2canvas'],
+            firebase: ['firebase/app', 'firebase/auth', 'firebase/firestore'],
+          },
+        },
+      },
+    },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

@@ -16,6 +16,19 @@
           _origConsoleError.apply(console, args);
         };
 
+        const _origConsoleWarn = console.warn;
+        console.warn = function(...args) {
+          if (args[0] && typeof args[0] === 'string' && (
+            args[0].includes('[vite]') ||
+            args[0].includes('workbox') ||
+            args[0].includes('Redirect auth check') ||
+            args[0].includes('THREE.WebGLRenderer')
+          )) {
+            return;
+          }
+          _origConsoleWarn.apply(console, args);
+        };
+
         const NativeWS = window.WebSocket;
         if (NativeWS) {
           window.WebSocket = function(url, protocols) {

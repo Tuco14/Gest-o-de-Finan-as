@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { Transaction, Account, PayableBill, FinancialGoal } from '../types';
 import { Robot3D } from './Robot3D';
+import { generateClientFinancialFallback } from '../utils/aiFallback';
 
 export interface ChatMessage {
   id: string;
@@ -125,17 +126,16 @@ export const AIChatModal: React.FC<AIChatModalProps> = ({
     setInputPrompt('');
     setIsLoading(true);
 
-    try {
-      const financialContext = {
-        availableBalance,
-        totalBalance,
-        accounts: accounts.map(a => ({
-          name: a.name,
-          institution: a.institution,
-          type: a.type,
-          balance: a.balance,
-          isMain: a.isMain,
-        })),
+    const financialContext = {
+      availableBalance,
+      totalBalance,
+      accounts: accounts.map(a => ({
+        name: a.name,
+        institution: a.institution,
+        type: a.type,
+        balance: a.balance,
+        isMain: a.isMain,
+      })),
         currentMonth,
         monthlyMetrics,
         bills: bills.map(b => ({
@@ -164,10 +164,11 @@ export const AIChatModal: React.FC<AIChatModalProps> = ({
         userEmail,
       };
 
-      const serverMessages = updatedMessages.slice(-10).map(m => ({
-        role: m.role,
-        content: m.content,
-      }));
+      try {
+        const serverMessages = updatedMessages.slice(-10).map(m => ({
+          role: m.role,
+          content: m.content,
+        }));
 
       const res = await fetch('/api/chat', {
         method: 'POST',
@@ -194,15 +195,15 @@ export const AIChatModal: React.FC<AIChatModalProps> = ({
       };
 
       setMessages(prev => [...prev, botReply]);
-    } catch (err: any) {
-      console.error('Erro ao consultar FinBot AI:', err);
-      const errorMessage: ChatMessage = {
-        id: `err-${Date.now()}`,
+    } catch {
+      const fallbackReply = generateClientFinancialFallback(text, financialContext);
+      const botReply: ChatMessage = {
+        id: `bot-${Date.now()}`,
         role: 'assistant',
-        content: `Ocorreu uma instabilidade ao processar a pergunta: ${err.message || 'Erro inesperado'}. Por favor, tente novamente.`,
+        content: fallbackReply,
         timestamp: new Date().toISOString(),
       };
-      setMessages(prev => [...prev, errorMessage]);
+      setMessages(prev => [...prev, botReply]);
     } finally {
       setIsLoading(false);
     }

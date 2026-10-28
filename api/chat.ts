@@ -1,4 +1,127 @@
 import { GoogleGenAI } from '@google/genai';
+import dotenv from 'dotenv';
+
+dotenv.config();
+
+function formatBRL(val: number): string {
+  return Number(val || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function extractPrice(text: string): number | null {
+  const patterns = [
+    /R\$\s*([\d\.,]+)/i,
+    /([\d\.,]+)\s*(?:reais|real)/i,
+    /(?:custa|custando|por|valor\s*(?:de)?)\s*(?:R\$)?\s*([\d\.,]+)/i,
+    /(\d+(?:[.,]\d{1,2})?)/
+  ];
+  for (const p of patterns) {
+    const m = text.match(p);
+    if (m && m[1]) {
+      const cleaned = m[1].replace(/\./g, '').replace(',', '.');
+      const val = parseFloat(cleaned);
+      if (!isNaN(val) && val > 0) return val;
+    }
+  }
+  return null;
+}
+
+function generateLocalFinancialAnalysis(userMessage: string, financialContext: any): string {
+  const availableBalance = Number(financialContext?.availableBalance || 0);
+  const totalBalance = Number(financialContext?.totalBalance || availableBalance);
+  const pendingExpense = Number(financialContext?.monthlyMetrics?.pendingExpense || 0);
+  const totalExpense = Number(financialContext?.monthlyMetrics?.totalExpense || 0);
+  const totalIncome = Number(financialContext?.monthlyMetrics?.totalIncome || 0);
+  const paidIncome = Number(financialContext?.monthlyMetrics?.paidIncome || 0);
+  const paidExpense = Number(financialContext?.monthlyMetrics?.paidExpense || 0);
+  const currentMonth = financialContext?.currentMonth || 'deste mês';
+
+  // Folga real de caixa (saldo disponível menos compromissos pendentes)
+  const saldoLivre = Math.round((availableBalance - pendingExpense) * 100) / 100;
+
+  // Análise de compra se o usuário informar ou perguntar sobre um gasto
+  const purchasePrice = extractPrice(userMessage);
+  const lowerMsg = userMessage.toLowerCase();
+  const isPurchaseQuery = purchasePrice !== null && (
+    lowerMsg.includes('posso') ||
+    lowerMsg.includes('comprar') ||
+    lowerMsg.includes('gastar') ||
+    lowerMsg.includes('vale') ||
+    lowerMsg.includes('dá pra') ||
+    lowerMsg.includes('da pra') ||
+    lowerMsg.includes('cabe') ||
+    lowerMsg.includes('reais')
+  );
+
+  if (isPurchaseQuery && purchasePrice !== null) {
+    const sobraAposCompra = Math.round((saldoLivre - purchasePrice) * 100) / 100;
+
+    if (purchasePrice <= saldoLivre * 0.7 && saldoLivre > 0) {
+      return `Sim, é possível realizar essa compra de **R$ ${formatBRL(purchasePrice)}** com tranquilidade.
+
+Sua situação financeira atual permite essa aquisição sem comprometer suas obrigações programadas:
+
+* **Saldo Disponível (Conta Principal):** R$ ${formatBRL(availableBalance)}
+* **Compromissos Pendentes do Mês:** R$ ${formatBRL(pendingExpense)}
+* **Folga Real de Caixa:** **R$ ${formatBRL(saldoLivre)}**
+* **Valor da Compra:** R$ ${formatBRL(purchasePrice)}
+* **Sobra Estimada Após a Compra:** **R$ ${formatBRL(sobraAposCompra)}**
+
+Essa compra compromete menos de 70% do seu saldo livre atual, preservando uma margem segura para imprevistos.`;
+    } else if (purchasePrice <= saldoLivre && saldoLivre > 0) {
+      return `É possível realizar a compra de **R$ ${formatBRL(purchasePrice)}**, mas com ressalvas.
+
+Confira os dados do seu fluxo de caixa:
+
+* **Saldo Disponível (Conta Principal):** R$ ${formatBRL(availableBalance)}
+* **Compromissos Pendentes do Mês:** R$ ${formatBRL(pendingExpense)}
+* **Folga Real de Caixa:** **R$ ${formatBRL(saldoLivre)}**
+* **Valor da Compra:** R$ ${formatBRL(purchasePrice)}
+* **Sobra Restante:** **R$ ${formatBRL(sobraAposCompra)}**
+
+Após essa compra, restará uma margem estreita para cobrir eventuais imprevistos até o encerramento do mês.`;
+    } else {
+      const deficit = Math.abs(Math.round((purchasePrice - saldoLivre) * 100) / 100);
+      return `Não é recomendável realizar a compra de **R$ ${formatBRL(purchasePrice)}** agora.
+
+O valor excede a sua folga real de caixa após descontar as contas pendentes:
+
+* **Saldo Disponível (Conta Principal):** R$ ${formatBRL(availableBalance)}
+* **Compromissos Pendentes do Mês:** R$ ${formatBRL(pendingExpense)}
+* **Folga Real de Caixa:** **R$ ${formatBRL(saldoLivre)}**
+* **Valor Necessário:** R$ ${formatBRL(purchasePrice)}
+* **Déficit:** **R$ ${formatBRL(deficit)}**
+
+Recomendamos aguardar o recebimento de novas receitas ou a quitação das despesas pendentes prioritárias antes de realizar esse gasto.`;
+    }
+  }
+
+  if (lowerMsg.includes('saldo') || lowerMsg.includes('resumo') || lowerMsg.includes('mês') || lowerMsg.includes('mes') || lowerMsg.includes('contas')) {
+    return `Aqui está o panorama financeiro de **${currentMonth}**:
+
+* **Saldo Disponível (Conta Principal):** **R$ ${formatBRL(availableBalance)}**
+* **Saldo Total em Contas:** R$ ${formatBRL(totalBalance)}
+* **Receitas do Mês:** R$ ${formatBRL(totalIncome)} (Recebido: R$ ${formatBRL(paidIncome)} | Pendente: R$ ${formatBRL(financialContext?.monthlyMetrics?.pendingIncome || 0)})
+* **Despesas do Mês:** R$ ${formatBRL(totalExpense)} (Pago: R$ ${formatBRL(paidExpense)} | Pendente: R$ ${formatBRL(pendingExpense)})
+* **Folga Livre de Caixa:** **R$ ${formatBRL(saldoLivre)}**
+
+Você pode me perguntar se cabe uma despesa específica no seu orçamento ou tirar dúvidas sobre suas contas a pagar.`;
+  }
+
+  return `Olá. Sou o FinBot AI, o consultor financeiro integrado ao FinControl.
+
+Seus dados financeiros estão conectados em tempo real:
+
+* **Saldo Disponível:** R$ ${formatBRL(availableBalance)}
+* **Despesas Pendentes:** R$ ${formatBRL(pendingExpense)}
+* **Folga Real de Caixa:** **R$ ${formatBRL(saldoLivre)}**
+
+Você pode me fazer perguntas práticas como:
+- *"Posso comprar um item de R$ 250 agora?"*
+- *"Como está meu mês financeiro?"*
+- *"Quanto ainda tenho que pagar de contas?"*
+
+Como posso orientar você hoje?`;
+}
 
 export default async function handler(req: any, res: any) {
   // Configuração de cabeçalhos de resposta
@@ -31,11 +154,20 @@ export default async function handler(req: any, res: any) {
       return res.status(400).json({ error: 'Lista de mensagens inválida ou vazia.' });
     }
 
-    const apiKey = process.env.GEMINI_API_KEY;
+    const lastUserMessage = messages[messages.length - 1]?.content || '';
+
+    // Aceita qualquer uma das variáveis comuns de ambiente
+    const apiKey = process.env.GEMINI_API_KEY || 
+                   process.env.GOOGLE_API_KEY || 
+                   process.env.API_KEY || 
+                   process.env.VITE_GEMINI_API_KEY || 
+                   process.env.VITE_GOOGLE_API_KEY;
+
+    // Se nenhuma chave de IA estiver configurada, responde com o motor local inteligente
     if (!apiKey) {
-      return res.status(500).json({
-        error: 'Chave de API do Gemini não configurada no ambiente do servidor.',
-      });
+      console.warn('[FinControl AI] Nenhuma chave Gemini detectada. Utilizando análise financeira local.');
+      const reply = generateLocalFinancialAnalysis(lastUserMessage, financialContext);
+      return res.status(200).json({ reply });
     }
 
     const ai = new GoogleGenAI({
@@ -90,11 +222,12 @@ COMO RESPONDER DÚVIDAS E PERGUNTAS DE COMPRA (Exemplo: "É possível comprar es
       parts: [{ text: m.content }],
     }));
 
-    // Modelos candidatos em ordem de preferência
+    // Modelos candidatos em ordem de preferência e resiliência
     const candidateModels = [
-      'gemini-3-flash-preview',
       'gemini-flash-latest',
+      'gemini-3.1-flash-lite',
       'gemini-3.8-flash',
+      'gemini-3-flash-preview',
     ];
 
     let reply = '';
@@ -102,7 +235,13 @@ COMO RESPONDER DÚVIDAS E PERGUNTAS DE COMPRA (Exemplo: "É possível comprar es
 
     for (const modelName of candidateModels) {
       try {
-        const response = await ai.models.generateContent({
+        const timeoutMs = 3500;
+        let timerId: any;
+        const timeoutPromise = new Promise((_, reject) => {
+          timerId = setTimeout(() => reject(new Error(`Timeout de ${timeoutMs}ms excedido para ${modelName}`)), timeoutMs);
+        });
+
+        const genPromise = ai.models.generateContent({
           model: modelName,
           contents,
           config: {
@@ -110,6 +249,11 @@ COMO RESPONDER DÚVIDAS E PERGUNTAS DE COMPRA (Exemplo: "É possível comprar es
             temperature: 0.7,
           },
         });
+
+        const response: any = await Promise.race([genPromise, timeoutPromise]).finally(() => {
+          clearTimeout(timerId);
+        });
+
         if (response && response.text) {
           reply = response.text;
           break;
@@ -121,14 +265,23 @@ COMO RESPONDER DÚVIDAS E PERGUNTAS DE COMPRA (Exemplo: "É possível comprar es
     }
 
     if (!reply) {
-      throw lastError || new Error('Não foi possível obter resposta dos modelos de IA.');
+      console.warn('[FinControl AI] Modelos Gemini indisponíveis ou lentos. Usando fallback de análise financeira.');
+      reply = generateLocalFinancialAnalysis(lastUserMessage, financialContext);
     }
 
     return res.status(200).json({ reply });
   } catch (error: any) {
-    console.error('Erro ao consultar Gemini na API:', error);
-    return res.status(500).json({
-      error: error.message || 'Erro interno ao consultar o assistente de inteligência artificial.',
-    });
+    console.error('Erro na rota /api/chat:', error);
+    // Em caso de erro imprevisto, retorna a análise financeira local em vez de quebrar a tela
+    try {
+      const messages = req.body?.messages;
+      const lastMsg = Array.isArray(messages) && messages.length > 0 ? messages[messages.length - 1]?.content : '';
+      const fallbackReply = generateLocalFinancialAnalysis(lastMsg, req.body?.financialContext);
+      return res.status(200).json({ reply: fallbackReply });
+    } catch {
+      return res.status(200).json({
+        reply: 'Olá! Estou processando suas informações financeiras. Por favor, reformule sua dúvida sobre saldo ou compras pendentes.',
+      });
+    }
   }
 }

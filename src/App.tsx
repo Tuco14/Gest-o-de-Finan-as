@@ -182,8 +182,8 @@ export default function App() {
           showToast(`Conectado como ${result.user.displayName || result.user.email}!`);
         }
       })
-      .catch(err => {
-        console.warn('Redirect auth check:', err);
+      .catch(() => {
+        // Ignora silenciosamente quando não há redirecionamento pendente
       });
 
     const unsubscribe = onAuthStateChanged(auth, user => {

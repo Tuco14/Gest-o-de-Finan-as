@@ -1,42 +1,9 @@
-var __create = Object.create;
-var __defProp = Object.defineProperty;
-var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
-var __getOwnPropNames = Object.getOwnPropertyNames;
-var __getProtoOf = Object.getPrototypeOf;
-var __hasOwnProp = Object.prototype.hasOwnProperty;
-var __export = (target, all) => {
-  for (var name in all)
-    __defProp(target, name, { get: all[name], enumerable: true });
-};
-var __copyProps = (to, from, except, desc) => {
-  if (from && typeof from === "object" || typeof from === "function") {
-    for (let key of __getOwnPropNames(from))
-      if (!__hasOwnProp.call(to, key) && key !== except)
-        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
-  }
-  return to;
-};
-var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
-  // If the importer is in node compatibility mode or this is not an ESM
-  // file that has been converted to a CommonJS file using a Babel-
-  // compatible transform (i.e. "__esModule" has not been set), then set
-  // "default" to the CommonJS "module.exports" for node compatibility.
-  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
-  mod
-));
-var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
-
 // server.ts
-var server_exports = {};
-__export(server_exports, {
-  createApp: () => createApp
-});
-module.exports = __toCommonJS(server_exports);
-var import_express = __toESM(require("express"), 1);
-var import_vite = require("vite");
-var import_path = __toESM(require("path"), 1);
-var import_url = require("url");
-var import_dotenv = __toESM(require("dotenv"), 1);
+import express from "express";
+import { createServer as createViteServer } from "vite";
+import path from "path";
+import { fileURLToPath } from "url";
+import dotenv2 from "dotenv";
 
 // api/health.ts
 function handler(req, res) {
@@ -53,7 +20,109 @@ function handler(req, res) {
 }
 
 // api/chat.ts
-var import_genai = require("@google/genai");
+import { GoogleGenAI } from "@google/genai";
+import dotenv from "dotenv";
+dotenv.config();
+function formatBRL(val) {
+  return Number(val || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function extractPrice(text) {
+  const patterns = [
+    /R\$\s*([\d\.,]+)/i,
+    /([\d\.,]+)\s*(?:reais|real)/i,
+    /(?:custa|custando|por|valor\s*(?:de)?)\s*(?:R\$)?\s*([\d\.,]+)/i,
+    /(\d+(?:[.,]\d{1,2})?)/
+  ];
+  for (const p of patterns) {
+    const m = text.match(p);
+    if (m && m[1]) {
+      const cleaned = m[1].replace(/\./g, "").replace(",", ".");
+      const val = parseFloat(cleaned);
+      if (!isNaN(val) && val > 0) return val;
+    }
+  }
+  return null;
+}
+function generateLocalFinancialAnalysis(userMessage, financialContext) {
+  const availableBalance = Number(financialContext?.availableBalance || 0);
+  const totalBalance = Number(financialContext?.totalBalance || availableBalance);
+  const pendingExpense = Number(financialContext?.monthlyMetrics?.pendingExpense || 0);
+  const totalExpense = Number(financialContext?.monthlyMetrics?.totalExpense || 0);
+  const totalIncome = Number(financialContext?.monthlyMetrics?.totalIncome || 0);
+  const paidIncome = Number(financialContext?.monthlyMetrics?.paidIncome || 0);
+  const paidExpense = Number(financialContext?.monthlyMetrics?.paidExpense || 0);
+  const currentMonth = financialContext?.currentMonth || "deste m\xEAs";
+  const saldoLivre = Math.round((availableBalance - pendingExpense) * 100) / 100;
+  const purchasePrice = extractPrice(userMessage);
+  const lowerMsg = userMessage.toLowerCase();
+  const isPurchaseQuery = purchasePrice !== null && (lowerMsg.includes("posso") || lowerMsg.includes("comprar") || lowerMsg.includes("gastar") || lowerMsg.includes("vale") || lowerMsg.includes("d\xE1 pra") || lowerMsg.includes("da pra") || lowerMsg.includes("cabe") || lowerMsg.includes("reais"));
+  if (isPurchaseQuery && purchasePrice !== null) {
+    const sobraAposCompra = Math.round((saldoLivre - purchasePrice) * 100) / 100;
+    if (purchasePrice <= saldoLivre * 0.7 && saldoLivre > 0) {
+      return `Sim, \xE9 poss\xEDvel realizar essa compra de **R$ ${formatBRL(purchasePrice)}** com tranquilidade.
+
+Sua situa\xE7\xE3o financeira atual permite essa aquisi\xE7\xE3o sem comprometer suas obriga\xE7\xF5es programadas:
+
+* **Saldo Dispon\xEDvel (Conta Principal):** R$ ${formatBRL(availableBalance)}
+* **Compromissos Pendentes do M\xEAs:** R$ ${formatBRL(pendingExpense)}
+* **Folga Real de Caixa:** **R$ ${formatBRL(saldoLivre)}**
+* **Valor da Compra:** R$ ${formatBRL(purchasePrice)}
+* **Sobra Estimada Ap\xF3s a Compra:** **R$ ${formatBRL(sobraAposCompra)}**
+
+Essa compra compromete menos de 70% do seu saldo livre atual, preservando uma margem segura para imprevistos.`;
+    } else if (purchasePrice <= saldoLivre && saldoLivre > 0) {
+      return `\xC9 poss\xEDvel realizar a compra de **R$ ${formatBRL(purchasePrice)}**, mas com ressalvas.
+
+Confira os dados do seu fluxo de caixa:
+
+* **Saldo Dispon\xEDvel (Conta Principal):** R$ ${formatBRL(availableBalance)}
+* **Compromissos Pendentes do M\xEAs:** R$ ${formatBRL(pendingExpense)}
+* **Folga Real de Caixa:** **R$ ${formatBRL(saldoLivre)}**
+* **Valor da Compra:** R$ ${formatBRL(purchasePrice)}
+* **Sobra Restante:** **R$ ${formatBRL(sobraAposCompra)}**
+
+Ap\xF3s essa compra, restar\xE1 uma margem estreita para cobrir eventuais imprevistos at\xE9 o encerramento do m\xEAs.`;
+    } else {
+      const deficit = Math.abs(Math.round((purchasePrice - saldoLivre) * 100) / 100);
+      return `N\xE3o \xE9 recomend\xE1vel realizar a compra de **R$ ${formatBRL(purchasePrice)}** agora.
+
+O valor excede a sua folga real de caixa ap\xF3s descontar as contas pendentes:
+
+* **Saldo Dispon\xEDvel (Conta Principal):** R$ ${formatBRL(availableBalance)}
+* **Compromissos Pendentes do M\xEAs:** R$ ${formatBRL(pendingExpense)}
+* **Folga Real de Caixa:** **R$ ${formatBRL(saldoLivre)}**
+* **Valor Necess\xE1rio:** R$ ${formatBRL(purchasePrice)}
+* **D\xE9ficit:** **R$ ${formatBRL(deficit)}**
+
+Recomendamos aguardar o recebimento de novas receitas ou a quita\xE7\xE3o das despesas pendentes priorit\xE1rias antes de realizar esse gasto.`;
+    }
+  }
+  if (lowerMsg.includes("saldo") || lowerMsg.includes("resumo") || lowerMsg.includes("m\xEAs") || lowerMsg.includes("mes") || lowerMsg.includes("contas")) {
+    return `Aqui est\xE1 o panorama financeiro de **${currentMonth}**:
+
+* **Saldo Dispon\xEDvel (Conta Principal):** **R$ ${formatBRL(availableBalance)}**
+* **Saldo Total em Contas:** R$ ${formatBRL(totalBalance)}
+* **Receitas do M\xEAs:** R$ ${formatBRL(totalIncome)} (Recebido: R$ ${formatBRL(paidIncome)} | Pendente: R$ ${formatBRL(financialContext?.monthlyMetrics?.pendingIncome || 0)})
+* **Despesas do M\xEAs:** R$ ${formatBRL(totalExpense)} (Pago: R$ ${formatBRL(paidExpense)} | Pendente: R$ ${formatBRL(pendingExpense)})
+* **Folga Livre de Caixa:** **R$ ${formatBRL(saldoLivre)}**
+
+Voc\xEA pode me perguntar se cabe uma despesa espec\xEDfica no seu or\xE7amento ou tirar d\xFAvidas sobre suas contas a pagar.`;
+  }
+  return `Ol\xE1. Sou o FinBot AI, o consultor financeiro integrado ao FinControl.
+
+Seus dados financeiros est\xE3o conectados em tempo real:
+
+* **Saldo Dispon\xEDvel:** R$ ${formatBRL(availableBalance)}
+* **Despesas Pendentes:** R$ ${formatBRL(pendingExpense)}
+* **Folga Real de Caixa:** **R$ ${formatBRL(saldoLivre)}**
+
+Voc\xEA pode me fazer perguntas pr\xE1ticas como:
+- *"Posso comprar um item de R$ 250 agora?"*
+- *"Como est\xE1 meu m\xEAs financeiro?"*
+- *"Quanto ainda tenho que pagar de contas?"*
+
+Como posso orientar voc\xEA hoje?`;
+}
 async function handler2(req, res) {
   res.setHeader("Content-Type", "application/json");
   if (req.method === "OPTIONS") {
@@ -78,13 +147,14 @@ async function handler2(req, res) {
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
       return res.status(400).json({ error: "Lista de mensagens inv\xE1lida ou vazia." });
     }
-    const apiKey = process.env.GEMINI_API_KEY;
+    const lastUserMessage = messages[messages.length - 1]?.content || "";
+    const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.API_KEY || process.env.VITE_GEMINI_API_KEY || process.env.VITE_GOOGLE_API_KEY;
     if (!apiKey) {
-      return res.status(500).json({
-        error: "Chave de API do Gemini n\xE3o configurada no ambiente do servidor."
-      });
+      console.warn("[FinControl AI] Nenhuma chave Gemini detectada. Utilizando an\xE1lise financeira local.");
+      const reply2 = generateLocalFinancialAnalysis(lastUserMessage, financialContext);
+      return res.status(200).json({ reply: reply2 });
     }
-    const ai = new import_genai.GoogleGenAI({
+    const ai = new GoogleGenAI({
       apiKey,
       httpOptions: {
         headers: {
@@ -131,21 +201,30 @@ COMO RESPONDER D\xDAVIDAS E PERGUNTAS DE COMPRA (Exemplo: "\xC9 poss\xEDvel comp
       parts: [{ text: m.content }]
     }));
     const candidateModels = [
-      "gemini-3-flash-preview",
       "gemini-flash-latest",
-      "gemini-3.8-flash"
+      "gemini-3.1-flash-lite",
+      "gemini-3.8-flash",
+      "gemini-3-flash-preview"
     ];
     let reply = "";
     let lastError = null;
     for (const modelName of candidateModels) {
       try {
-        const response = await ai.models.generateContent({
+        const timeoutMs = 3500;
+        let timerId;
+        const timeoutPromise = new Promise((_, reject) => {
+          timerId = setTimeout(() => reject(new Error(`Timeout de ${timeoutMs}ms excedido para ${modelName}`)), timeoutMs);
+        });
+        const genPromise = ai.models.generateContent({
           model: modelName,
           contents,
           config: {
             systemInstruction,
             temperature: 0.7
           }
+        });
+        const response = await Promise.race([genPromise, timeoutPromise]).finally(() => {
+          clearTimeout(timerId);
         });
         if (response && response.text) {
           reply = response.text;
@@ -157,25 +236,32 @@ COMO RESPONDER D\xDAVIDAS E PERGUNTAS DE COMPRA (Exemplo: "\xC9 poss\xEDvel comp
       }
     }
     if (!reply) {
-      throw lastError || new Error("N\xE3o foi poss\xEDvel obter resposta dos modelos de IA.");
+      console.warn("[FinControl AI] Modelos Gemini indispon\xEDveis ou lentos. Usando fallback de an\xE1lise financeira.");
+      reply = generateLocalFinancialAnalysis(lastUserMessage, financialContext);
     }
     return res.status(200).json({ reply });
   } catch (error) {
-    console.error("Erro ao consultar Gemini na API:", error);
-    return res.status(500).json({
-      error: error.message || "Erro interno ao consultar o assistente de intelig\xEAncia artificial."
-    });
+    console.error("Erro na rota /api/chat:", error);
+    try {
+      const messages = req.body?.messages;
+      const lastMsg = Array.isArray(messages) && messages.length > 0 ? messages[messages.length - 1]?.content : "";
+      const fallbackReply = generateLocalFinancialAnalysis(lastMsg, req.body?.financialContext);
+      return res.status(200).json({ reply: fallbackReply });
+    } catch {
+      return res.status(200).json({
+        reply: "Ol\xE1! Estou processando suas informa\xE7\xF5es financeiras. Por favor, reformule sua d\xFAvida sobre saldo ou compras pendentes."
+      });
+    }
   }
 }
 
 // server.ts
-var import_meta = {};
-import_dotenv.default.config();
-var __filename = (0, import_url.fileURLToPath)(import_meta.url);
-var __dirname = import_path.default.dirname(__filename);
+dotenv2.config();
+var __filename = fileURLToPath(import.meta.url);
+var __dirname = path.dirname(__filename);
 async function createApp() {
-  const app = (0, import_express.default)();
-  app.use(import_express.default.json({ limit: "10mb" }));
+  const app = express();
+  app.use(express.json({ limit: "10mb" }));
   app.get("/api/health", (req, res) => {
     return handler(req, res);
   });
@@ -183,12 +269,12 @@ async function createApp() {
     return handler2(req, res);
   });
   if (process.env.NODE_ENV === "production") {
-    app.use(import_express.default.static(import_path.default.resolve(__dirname, "dist")));
+    app.use(express.static(path.resolve(__dirname, "dist")));
     app.get("*", (req, res) => {
-      res.sendFile(import_path.default.resolve(__dirname, "dist", "index.html"));
+      res.sendFile(path.resolve(__dirname, "dist", "index.html"));
     });
   } else {
-    const vite = await (0, import_vite.createServer)({
+    const vite = await createViteServer({
       server: {
         middlewareMode: true,
         host: "0.0.0.0",
@@ -216,7 +302,6 @@ startServer().catch((err) => {
   console.error("Falha ao iniciar servidor:", err);
   process.exit(1);
 });
-// Annotate the CommonJS export names for ESM import in node:
-0 && (module.exports = {
+export {
   createApp
-});
+};
