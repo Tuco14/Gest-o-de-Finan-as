@@ -1558,6 +1558,7 @@ export default function App() {
         accounts={accountsWithLiveBalances}
         categories={categories}
         goals={goals}
+        bills={bills}
         userEmail={currentUser?.email || localUser?.email}
         onToast={showToast}
       />

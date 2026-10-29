@@ -1,6 +1,6 @@
 import React, { useRef, useState } from 'react';
-import { Transaction, Account, Category, FinancialGoal } from '../types';
-import { formatCurrency, formatMonthYear } from '../utils/formatters';
+import { Transaction, Account, Category, FinancialGoal, PayableBill } from '../types';
+import { formatCurrency, formatMonthYear, formatDateBR } from '../utils/formatters';
 import { 
   FileText, 
   Download, 
@@ -10,13 +10,19 @@ import {
   TrendingDown, 
   Wallet, 
   PiggyBank, 
-  CheckCircle2, 
   Calendar, 
-  Layers, 
   Shield, 
   Building2,
   PieChart as PieIcon,
-  Loader2
+  Loader2,
+  BarChart3,
+  CreditCard,
+  Clock,
+  Sparkles,
+  Award,
+  Target,
+  FileCheck2,
+  Receipt
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
@@ -29,6 +35,7 @@ interface MonthlyReportModalProps {
   accounts: Account[];
   categories: Category[];
   goals: FinancialGoal[];
+  bills?: PayableBill[];
   userEmail?: string | null;
   onToast: (msg: string) => void;
 }
@@ -41,24 +48,37 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
   accounts,
   categories,
   goals,
+  bills = [],
   userEmail,
   onToast,
 }) => {
-  const reportRef = useRef<HTMLDivElement>(null);
+  const page1Ref = useRef<HTMLDivElement>(null);
+  const page2Ref = useRef<HTMLDivElement>(null);
+  
   const [isGenerating, setIsGenerating] = useState(false);
+  const [reportFormat, setReportFormat] = useState<'2pages' | '1page'>('2pages');
   const [includeAccounts, setIncludeAccounts] = useState(true);
   const [includeTopExpenses, setIncludeTopExpenses] = useState(true);
   const [hideSensitiveValues, setHideSensitiveValues] = useState(false);
 
   if (!isOpen) return null;
 
-  // Filtragem dos dados do mês
-  const monthTransactions = transactions.filter(t => t.date.startsWith(currentMonth));
+  // 1. Filtragem e saneamento dos dados do mês
+  const monthTransactions = transactions.filter(t => t.date && t.date.startsWith(currentMonth));
   
-  const categoryMap = new Map<string, Category>(categories.map(c => [c.id, c]));
+  // Mapeamento inteligente de categoria (busca por ID ou por Nome)
+  const getCategoryInfo = (catIdentifier: string) => {
+    if (!catIdentifier) return { id: 'outros', name: 'Outros', color: '#71717a', iconName: 'Layers' };
+    const byId = categories.find(c => c.id === catIdentifier);
+    if (byId) return byId;
+    const byName = categories.find(c => c.name.toLowerCase() === catIdentifier.toLowerCase());
+    if (byName) return byName;
+    return { id: catIdentifier, name: catIdentifier, color: '#71717a', iconName: 'Layers' };
+  };
+
   const accountMap = new Map<string, Account>(accounts.map(a => [a.id, a]));
 
-  // Cálculos consolidados
+  // 2. Cálculos consolidados de Receitas e Despesas
   let totalIncome = 0;
   let paidIncome = 0;
   let pendingIncome = 0;
@@ -67,75 +87,154 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
   let paidExpense = 0;
   let pendingExpense = 0;
 
-  const categoryExpenses: Record<string, number> = {};
+  const categoryExpenses: Record<string, { name: string; color: string; amount: number }> = {};
+  const paymentMethodExpenses: Record<string, number> = {};
+
+  // Divisão por semanas do mês
+  const weeklyExpenses = [
+    { label: 'Semana 1', days: '01 a 07', amount: 0, count: 0 },
+    { label: 'Semana 2', days: '08 a 14', amount: 0, count: 0 },
+    { label: 'Semana 3', days: '15 a 21', amount: 0, count: 0 },
+    { label: 'Semana 4', days: '22 a 31', amount: 0, count: 0 },
+  ];
 
   monthTransactions.forEach(t => {
+    const amount = Number(t.amount || 0);
+    
     if (t.type === 'income') {
-      totalIncome += t.amount;
-      if (t.status === 'paid') paidIncome += t.amount;
-      else pendingIncome += t.amount;
+      totalIncome += amount;
+      if (t.status === 'paid') paidIncome += amount;
+      else pendingIncome += amount;
     } else {
-      totalExpense += t.amount;
-      if (t.status === 'paid') paidExpense += t.amount;
-      else pendingExpense += t.amount;
-      categoryExpenses[t.category] = (categoryExpenses[t.category] || 0) + t.amount;
+      totalExpense += amount;
+      if (t.status === 'paid') paidExpense += amount;
+      else pendingExpense += amount;
+
+      // Categoria consolidada
+      const catInfo = getCategoryInfo(t.category);
+      if (!categoryExpenses[catInfo.id]) {
+        categoryExpenses[catInfo.id] = { name: catInfo.name, color: catInfo.color, amount: 0 };
+      }
+      categoryExpenses[catInfo.id].amount += amount;
+
+      // Forma de pagamento
+      const method = t.paymentMethod || 'Outros';
+      paymentMethodExpenses[method] = (paymentMethodExpenses[method] || 0) + amount;
+
+      // Semana da despesa
+      const cleanDate = (t.date || '').split('T')[0];
+      const dayNum = parseInt(cleanDate.split('-')[2] || '1', 10);
+      if (dayNum <= 7) {
+        weeklyExpenses[0].amount += amount;
+        weeklyExpenses[0].count++;
+      } else if (dayNum <= 14) {
+        weeklyExpenses[1].amount += amount;
+        weeklyExpenses[1].count++;
+      } else if (dayNum <= 21) {
+        weeklyExpenses[2].amount += amount;
+        weeklyExpenses[2].count++;
+      } else {
+        weeklyExpenses[3].amount += amount;
+        weeklyExpenses[3].count++;
+      }
     }
   });
 
   const netBalance = totalIncome - totalExpense;
   const savingsRate = totalIncome > 0 ? Math.max(0, (netBalance / totalIncome) * 100) : 0;
-  const totalAccountBalance = accounts.reduce((sum, a) => sum + a.balance, 0);
+  const totalAccountBalance = accounts.reduce((sum, a) => sum + Number(a.balance || 0), 0);
+  const expenseLiquidityRate = totalExpense > 0 ? (paidExpense / totalExpense) * 100 : 100;
 
-  // Ordenar categorias por maior despesa
+  // 3. Ordenar categorias por maior despesa
   const sortedCategories = Object.entries(categoryExpenses)
-    .map(([catId, amount]) => {
-      const cat = categoryMap.get(catId);
-      const percentage = totalExpense > 0 ? (amount / totalExpense) * 100 : 0;
+    .map(([catId, data]) => {
+      const percentage = totalExpense > 0 ? (data.amount / totalExpense) * 100 : 0;
       return {
         id: catId,
-        name: cat?.name || 'Outros',
-        color: cat?.color || '#a1a1aa',
-        amount,
+        name: data.name,
+        color: data.color || '#18181b',
+        amount: data.amount,
         percentage,
       };
     })
     .sort((a, b) => b.amount - a.amount);
 
-  // Maiores despesas individuais
+  // 4. TOP 6 MAIORES DESPESAS INDIVIDUAIS (100% blindado e ordenado numericamente)
   const topExpenses = [...monthTransactions]
     .filter(t => t.type === 'expense')
-    .sort((a, b) => b.amount - a.amount)
+    .map(t => ({
+      ...t,
+      numAmount: Number(t.amount || 0)
+    }))
+    .sort((a, b) => b.numAmount - a.numAmount)
     .slice(0, 6);
 
-  // Regra 50/30/20
+  const highestSingleExpense = topExpenses[0]?.numAmount || 1;
+
+  // 5. Formas de Pagamento ordenadas
+  const sortedPaymentMethods = Object.entries(paymentMethodExpenses)
+    .map(([method, amount]) => ({
+      method,
+      amount,
+      percentage: totalExpense > 0 ? (amount / totalExpense) * 100 : 0,
+    }))
+    .sort((a, b) => b.amount - a.amount);
+
+  // 6. Regra 50/30/20 com classificação inteligente
   let needs = 0;
   let wants = 0;
-  Object.entries(categoryExpenses).forEach(([catId, amt]) => {
-    if (['cat-moradia', 'cat-alimentacao', 'cat-transporte', 'cat-saude'].includes(catId)) {
-      needs += amt;
+  Object.entries(categoryExpenses).forEach(([catId, data]) => {
+    const lower = (catId + ' ' + data.name).toLowerCase();
+    if (
+      lower.includes('moradia') || 
+      lower.includes('aluguel') || 
+      lower.includes('condom') || 
+      lower.includes('alimenta') || 
+      lower.includes('mercado') || 
+      lower.includes('transporte') || 
+      lower.includes('combust') || 
+      lower.includes('saúde') || 
+      lower.includes('saude') || 
+      lower.includes('luz') || 
+      lower.includes('água') || 
+      lower.includes('agua')
+    ) {
+      needs += data.amount;
     } else {
-      wants += amt;
+      wants += data.amount;
     }
   });
+
   const needsPercent = totalIncome > 0 ? (needs / totalIncome) * 100 : 0;
   const wantsPercent = totalIncome > 0 ? (wants / totalIncome) * 100 : 0;
 
-  // Gerar e baixar arquivo PDF formatado
+  // 7. Score de Saúde Financeira do Mês (0 a 100)
+  let healthScore = 70;
+  if (totalIncome > 0) {
+    if (netBalance >= 0) {
+      healthScore += Math.min(25, Math.round(savingsRate * 0.8));
+    } else {
+      healthScore -= Math.min(45, Math.round((Math.abs(netBalance) / totalIncome) * 40));
+    }
+    if (expenseLiquidityRate >= 80) healthScore += 5;
+  }
+  healthScore = Math.max(15, Math.min(98, healthScore));
+
+  const getScoreBadge = (score: number) => {
+    if (score >= 85) return { label: 'Excelente', color: 'bg-emerald-100 text-emerald-900 border-emerald-300' };
+    if (score >= 70) return { label: 'Saudável', color: 'bg-lime-100 text-lime-900 border-lime-300' };
+    if (score >= 50) return { label: 'Atenção', color: 'bg-amber-100 text-amber-900 border-amber-300' };
+    return { label: 'Déficit / Crítico', color: 'bg-rose-100 text-rose-900 border-rose-300' };
+  };
+
+  const scoreBadge = getScoreBadge(healthScore);
+
+  // 8. Download do PDF com renderização independente por página (sem cortes horizontais!)
   const handleDownloadPDF = async () => {
-    if (!reportRef.current) return;
+    if (!page1Ref.current) return;
     setIsGenerating(true);
 
     try {
-      // Configurar opções do html2canvas para renderização nítida
-      const canvas = await html2canvas(reportRef.current, {
-        scale: 2, // Maior DPI para texto nítido
-        useCORS: true,
-        logging: false,
-        backgroundColor: '#ffffff',
-        windowWidth: 1024,
-      });
-
-      const imgData = canvas.toDataURL('image/png');
       const pdf = new jsPDF({
         orientation: 'portrait',
         unit: 'mm',
@@ -144,30 +243,40 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
 
       const pdfWidth = pdf.internal.pageSize.getWidth();
       const pdfHeight = pdf.internal.pageSize.getHeight();
-      const imgWidth = pdfWidth;
-      const imgHeight = (canvas.height * pdfWidth) / canvas.width;
 
-      let heightLeft = imgHeight;
-      let position = 0;
+      // Renderiza a Página 1 com precisão A4
+      const canvas1 = await html2canvas(page1Ref.current, {
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        backgroundColor: '#ffffff',
+        windowWidth: 800,
+      });
 
-      // Adicionar primeira página
-      pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
-      heightLeft -= pdfHeight;
+      const imgData1 = canvas1.toDataURL('image/png');
+      pdf.addImage(imgData1, 'PNG', 0, 0, pdfWidth, pdfHeight);
 
-      // Se o relatório for mais longo que uma página A4, adiciona as páginas seguintes
-      while (heightLeft > 0) {
-        position = heightLeft - imgHeight;
+      // Se o formato for de 2 páginas e existir a página 2
+      if (reportFormat === '2pages' && page2Ref.current) {
         pdf.addPage();
-        pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
-        heightLeft -= pdfHeight;
+        const canvas2 = await html2canvas(page2Ref.current, {
+          scale: 2,
+          useCORS: true,
+          logging: false,
+          backgroundColor: '#ffffff',
+          windowWidth: 800,
+        });
+
+        const imgData2 = canvas2.toDataURL('image/png');
+        pdf.addImage(imgData2, 'PNG', 0, 0, pdfWidth, pdfHeight);
       }
 
-      const fileName = `FinControl-Resumo-Mensal-${currentMonth}.pdf`;
+      const fileName = `FinControl-Relatorio-${currentMonth}.pdf`;
       pdf.save(fileName);
-      onToast('PDF do Resumo Mensal baixado com sucesso!');
+      onToast('PDF do Relatório baixado com sucesso!');
     } catch (error) {
       console.error('Erro ao gerar PDF:', error);
-      onToast('Não foi possível gerar o arquivo PDF. Tente a opção de Imprimir.');
+      onToast('Não foi possível gerar o PDF. Você também pode utilizar o botão Imprimir.');
     } finally {
       setIsGenerating(false);
     }
@@ -185,22 +294,27 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
     return hideSensitiveValues ? '••%' : `${pct.toFixed(1)}%`;
   };
 
+  const highestWeekly = Math.max(...weeklyExpenses.map(w => w.amount), 1);
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/80 backdrop-blur-xs overflow-y-auto">
-      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-4xl max-h-[94vh] flex flex-col shadow-2xl overflow-hidden my-auto">
+      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-4xl max-h-[95vh] flex flex-col shadow-2xl overflow-hidden my-auto">
         
-        {/* Modal Top Bar */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800 bg-zinc-950/80 shrink-0">
+        {/* Barra Superior do Modal */}
+        <div className="flex items-center justify-between px-6 py-3.5 border-b border-zinc-800 bg-zinc-950/80 shrink-0">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-xl bg-lime-400/20 text-lime-400 flex items-center justify-center">
               <FileText className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-sm sm:text-base font-bold text-white">
-                Exportar Resumo Mensal em PDF
+              <h2 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
+                <span>Exportar Relatório em PDF</span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-lime-400/20 text-lime-400 font-bold border border-lime-400/30">
+                  Sem Cortes
+                </span>
               </h2>
               <p className="text-[11px] text-zinc-400">
-                Relatório executivo formatado com gráficos, saldos e indicadores de {formatMonthYear(currentMonth)}
+                Resumo executivo diagramado em páginas A4 perfeitas de {formatMonthYear(currentMonth)}
               </p>
             </div>
           </div>
@@ -243,20 +357,25 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
           </div>
         </div>
 
-        {/* Opções de Personalização do Relatório */}
+        {/* Barra de Opções e Formato */}
         <div className="px-6 py-2.5 bg-zinc-850/60 border-b border-zinc-800 flex flex-wrap items-center justify-between gap-3 text-xs text-zinc-300 shrink-0">
           <div className="flex flex-wrap items-center gap-4">
-            <span className="font-semibold text-zinc-400 text-[11px] uppercase tracking-wider">Incluir no PDF:</span>
-            
-            <label className="flex items-center gap-1.5 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={includeAccounts}
-                onChange={e => setIncludeAccounts(e.target.checked)}
-                className="w-3.5 h-3.5 rounded bg-zinc-900 border-zinc-700 text-lime-400 accent-lime-400 cursor-pointer"
-              />
-              <span>Saldos de Contas</span>
-            </label>
+            <div className="flex items-center gap-1 bg-zinc-900 border border-zinc-750 p-0.5 rounded-lg text-[11px]">
+              <button
+                type="button"
+                onClick={() => setReportFormat('2pages')}
+                className={`px-2.5 py-1 rounded-md font-semibold transition-all cursor-pointer ${reportFormat === '2pages' ? 'bg-lime-400 text-zinc-950' : 'text-zinc-400 hover:text-white'}`}
+              >
+                2 Páginas (Completo)
+              </button>
+              <button
+                type="button"
+                onClick={() => setReportFormat('1page')}
+                className={`px-2.5 py-1 rounded-md font-semibold transition-all cursor-pointer ${reportFormat === '1page' ? 'bg-lime-400 text-zinc-950' : 'text-zinc-400 hover:text-white'}`}
+              >
+                1 Página (Compacto)
+              </button>
+            </div>
 
             <label className="flex items-center gap-1.5 cursor-pointer select-none">
               <input
@@ -265,7 +384,17 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
                 onChange={e => setIncludeTopExpenses(e.target.checked)}
                 className="w-3.5 h-3.5 rounded bg-zinc-900 border-zinc-700 text-lime-400 accent-lime-400 cursor-pointer"
               />
-              <span>Maiores Despesas</span>
+              <span>Top 6 Maiores Despesas</span>
+            </label>
+
+            <label className="flex items-center gap-1.5 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={includeAccounts}
+                onChange={e => setIncludeAccounts(e.target.checked)}
+                className="w-3.5 h-3.5 rounded bg-zinc-900 border-zinc-700 text-lime-400 accent-lime-400 cursor-pointer"
+              />
+              <span>Saldos por Conta</span>
             </label>
           </div>
 
@@ -280,138 +409,192 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
           </label>
         </div>
 
-        {/* Área de Visualização do Relatório Formatado (Documento A4) */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-zinc-950/90 flex justify-center">
+        {/* Área de Visualização com Páginas A4 Distintas */}
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-zinc-950/90 flex flex-col items-center gap-6">
+          
+          {/* ========================================================= */}
+          {/* PÁGINA 1: PAINEL EXECUTIVO & ANÁLISE GRÁFICA              */}
+          {/* ========================================================= */}
           <div
-            ref={reportRef}
-            id="report-printable-area"
-            className="w-full max-w-[780px] bg-white text-zinc-900 p-8 sm:p-10 rounded-xl shadow-xl border border-zinc-200 font-sans print:shadow-none print:border-none print:m-0 print:p-6"
-            style={{ minHeight: '1000px' }}
+            ref={page1Ref}
+            id="report-page-1"
+            className="w-full max-w-[760px] bg-white text-zinc-900 p-8 sm:p-9 rounded-xl shadow-xl border border-zinc-200 font-sans print:shadow-none print:border-none print:m-0 print:p-6 flex flex-col justify-between"
+            style={{ minHeight: '1075px', maxHeight: '1075px', boxSizing: 'border-box' }}
           >
-            {/* Cabeçalho do Documento */}
-            <div className="flex items-start justify-between border-b-2 border-zinc-900 pb-5 mb-6">
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <div className="w-8 h-8 rounded-lg bg-zinc-950 text-lime-400 flex items-center justify-center font-black text-sm">
-                    FC
+            <div>
+              {/* Cabeçalho Página 1 */}
+              <div className="flex items-start justify-between border-b-2 border-zinc-900 pb-4 mb-4">
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <div className="w-8 h-8 rounded-lg bg-zinc-950 text-lime-400 flex items-center justify-center font-black text-sm shadow-xs">
+                      FC
+                    </div>
+                    <div>
+                      <h1 className="text-xl font-extrabold text-zinc-950 tracking-tight leading-none">
+                        FinControl
+                      </h1>
+                      <span className="text-[9px] uppercase font-bold text-zinc-500 tracking-wider">
+                        Gestão Financeira & Inteligência de Dados
+                      </span>
+                    </div>
                   </div>
-                  <div>
-                    <h1 className="text-xl font-extrabold text-zinc-950 tracking-tight leading-none">
-                      FinControl
-                    </h1>
-                    <span className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider">
-                      Gestão Financeira Inteligente
+                  <h2 className="text-base font-black text-zinc-900 mt-1.5 tracking-tight">
+                    Relatório Executivo Mensal
+                  </h2>
+                  <div className="flex items-center gap-2 text-[11px] text-zinc-600">
+                    <Calendar className="w-3.5 h-3.5 text-zinc-500" />
+                    <span>Mês de Referência: <strong className="text-zinc-900 capitalize">{formatMonthYear(currentMonth)}</strong></span>
+                  </div>
+                </div>
+
+                <div className="text-right">
+                  <div className="flex items-center justify-end gap-1.5 mb-1.5">
+                    <span className={`inline-block px-2.5 py-0.5 text-[10px] font-extrabold rounded-md uppercase tracking-wider border ${netBalance >= 0 ? 'bg-emerald-100 text-emerald-900 border-emerald-300' : 'bg-rose-100 text-rose-900 border-rose-300'}`}>
+                      {netBalance >= 0 ? `Superávit: +${maskVal(netBalance)}` : `Déficit: ${maskVal(netBalance)}`}
                     </span>
                   </div>
-                </div>
-                <h2 className="text-lg font-bold text-zinc-800 mt-2">
-                  Relatório Executivo Mensal
-                </h2>
-                <div className="flex items-center gap-2 text-xs text-zinc-600 mt-0.5">
-                  <Calendar className="w-3.5 h-3.5 text-zinc-500" />
-                  <span>Período de Referência: <strong className="text-zinc-900 capitalize">{formatMonthYear(currentMonth)}</strong></span>
-                </div>
-              </div>
-
-              <div className="text-right">
-                <span className="inline-block px-3 py-1 bg-lime-100 text-lime-900 text-[11px] font-extrabold rounded-md uppercase tracking-wider mb-2 border border-lime-300">
-                  {netBalance >= 0 ? 'Superávit Consolidado' : 'Déficit no Período'}
-                </span>
-                <p className="text-[11px] text-zinc-500">
-                  Emissão: {new Date().toLocaleDateString('pt-BR')} às {new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-                </p>
-                {userEmail && (
-                  <p className="text-[11px] text-zinc-500 font-medium">
-                    Titular: {userEmail}
+                  <p className="text-[10px] text-zinc-500">
+                    Emissão: {new Date().toLocaleDateString('pt-BR')} às {new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
                   </p>
-                )}
-              </div>
-            </div>
-
-            {/* Grid 4 Cards de Principais Saldos e Métricas */}
-            <div className="grid grid-cols-4 gap-3 mb-6">
-              {/* Receitas */}
-              <div className="bg-zinc-50 border border-zinc-200 rounded-lg p-3">
-                <div className="flex items-center justify-between text-zinc-500 mb-1">
-                  <span className="text-[10px] font-bold uppercase tracking-wider">Receitas</span>
-                  <TrendingUp className="w-3.5 h-3.5 text-emerald-600" />
-                </div>
-                <div className="text-base font-extrabold text-emerald-700">
-                  {maskVal(totalIncome)}
-                </div>
-                <div className="text-[9px] text-zinc-500 mt-1 flex justify-between">
-                  <span>Recebido: {maskVal(paidIncome)}</span>
-                  <span>Prev: {maskVal(pendingIncome)}</span>
+                  {userEmail && (
+                    <p className="text-[10px] text-zinc-600 font-semibold truncate max-w-[220px]">
+                      Titular: {userEmail}
+                    </p>
+                  )}
                 </div>
               </div>
 
-              {/* Despesas */}
-              <div className="bg-zinc-50 border border-zinc-200 rounded-lg p-3">
-                <div className="flex items-center justify-between text-zinc-500 mb-1">
-                  <span className="text-[10px] font-bold uppercase tracking-wider">Despesas</span>
-                  <TrendingDown className="w-3.5 h-3.5 text-rose-600" />
+              {/* Diagnóstico Executivo & Score de Saúde Financeira */}
+              <div className="bg-gradient-to-r from-zinc-50 to-zinc-100/70 border border-zinc-200 rounded-xl p-3 mb-4 flex items-center justify-between gap-3">
+                <div className="flex-1">
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <Sparkles className="w-3.5 h-3.5 text-lime-600" />
+                    <span className="text-[11px] font-black uppercase tracking-wider text-zinc-800">
+                      Diagnóstico do Mês
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-zinc-700 leading-snug">
+                    {netBalance >= 0 ? (
+                      <>
+                        Você encerrou o período com <strong>resultado positivo</strong>, preservando <strong>{maskPercent(savingsRate)}</strong> das receitas (sobra líquida de <strong>{maskVal(netBalance)}</strong>). 
+                        {sortedCategories[0] ? ` Maior concentração em ${sortedCategories[0].name} (${maskPercent(sortedCategories[0].percentage)} do total).` : ''}
+                      </>
+                    ) : (
+                      <>
+                        Despesas superaram receitas em <strong>{maskVal(Math.abs(netBalance))}</strong>. 
+                        Recomendamos atenção às contas pendentes ({maskVal(pendingExpense)}) e contenção em gastos com lazer.
+                      </>
+                    )}
+                  </p>
+
+                  {/* Destaque solicitado: esse mês gastou tantos % e tantos reais em tal item */}
+                  {topExpenses[0] && (
+                    <div className="mt-2 pt-1.5 border-t border-zinc-200/80 flex items-center justify-between text-[10.5px] text-zinc-800">
+                      <div className="flex items-center gap-1.5 truncate">
+                        <span className="w-2 h-2 rounded-full bg-rose-500 shrink-0" />
+                        <span>
+                          Esse mês você gastou <strong className="text-zinc-950">{maskPercent((topExpenses[0].numAmount / (totalExpense || 1)) * 100)}</strong> ({maskVal(topExpenses[0].numAmount)}) em <strong className="text-zinc-950">{topExpenses[0].description || 'Item Principal'}</strong>.
+                        </span>
+                      </div>
+                      <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded bg-rose-100 text-rose-800 border border-rose-200 shrink-0 ml-2">
+                        Maior Gasto
+                      </span>
+                    </div>
+                  )}
                 </div>
-                <div className="text-base font-extrabold text-rose-700">
-                  {maskVal(totalExpense)}
-                </div>
-                <div className="text-[9px] text-zinc-500 mt-1 flex justify-between">
-                  <span>Pago: {maskVal(paidExpense)}</span>
-                  <span>A pagar: {maskVal(pendingExpense)}</span>
+
+                {/* Score */}
+                <div className="bg-white border border-zinc-200 rounded-lg px-3 py-1.5 text-center shrink-0 min-w-[120px] shadow-xs">
+                  <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-wider block">
+                    Saúde Financeira
+                  </span>
+                  <div className="text-lg font-black text-zinc-950 leading-tight">
+                    {healthScore}<span className="text-[10px] font-normal text-zinc-400">/100</span>
+                  </div>
+                  <span className={`inline-block px-1.5 py-0.2 text-[8px] font-extrabold uppercase rounded-full border ${scoreBadge.color}`}>
+                    {scoreBadge.label}
+                  </span>
                 </div>
               </div>
 
-              {/* Saldo Líquido do Mês */}
-              <div className="bg-zinc-50 border border-zinc-200 rounded-lg p-3">
-                <div className="flex items-center justify-between text-zinc-500 mb-1">
-                  <span className="text-[10px] font-bold uppercase tracking-wider">Resultado Líquido</span>
-                  <PiggyBank className="w-3.5 h-3.5 text-zinc-700" />
+              {/* 4 Cards de Principais Métricas Consolidadas */}
+              <div className="grid grid-cols-4 gap-2.5 mb-4">
+                <div className="bg-zinc-50 border border-zinc-200 rounded-lg p-2.5">
+                  <div className="flex items-center justify-between text-zinc-500 mb-0.5">
+                    <span className="text-[9px] font-bold uppercase tracking-wider">Receitas</span>
+                    <TrendingUp className="w-3.5 h-3.5 text-emerald-600" />
+                  </div>
+                  <div className="text-sm font-black text-emerald-700">
+                    {maskVal(totalIncome)}
+                  </div>
+                  <div className="text-[8.5px] text-zinc-500 mt-0.5 flex justify-between">
+                    <span>Rec: {maskVal(paidIncome)}</span>
+                    <span>Pend: {maskVal(pendingIncome)}</span>
+                  </div>
                 </div>
-                <div className={`text-base font-extrabold ${netBalance >= 0 ? 'text-zinc-900' : 'text-rose-700'}`}>
-                  {netBalance >= 0 ? `+${maskVal(netBalance)}` : maskVal(netBalance)}
+
+                <div className="bg-zinc-50 border border-zinc-200 rounded-lg p-2.5">
+                  <div className="flex items-center justify-between text-zinc-500 mb-0.5">
+                    <span className="text-[9px] font-bold uppercase tracking-wider">Despesas</span>
+                    <TrendingDown className="w-3.5 h-3.5 text-rose-600" />
+                  </div>
+                  <div className="text-sm font-black text-rose-700">
+                    {maskVal(totalExpense)}
+                  </div>
+                  <div className="text-[8.5px] text-zinc-500 mt-0.5 flex justify-between">
+                    <span>Pago: {maskVal(paidExpense)}</span>
+                    <span>Pend: {maskVal(pendingExpense)}</span>
+                  </div>
                 </div>
-                <div className="text-[9px] text-zinc-500 mt-1">
-                  Taxa Poupança: <strong className="text-zinc-800">{maskPercent(savingsRate)}</strong>
+
+                <div className="bg-zinc-50 border border-zinc-200 rounded-lg p-2.5">
+                  <div className="flex items-center justify-between text-zinc-500 mb-0.5">
+                    <span className="text-[9px] font-bold uppercase tracking-wider">Resultado</span>
+                    <PiggyBank className="w-3.5 h-3.5 text-zinc-700" />
+                  </div>
+                  <div className={`text-sm font-black ${netBalance >= 0 ? 'text-zinc-900' : 'text-rose-700'}`}>
+                    {netBalance >= 0 ? `+${maskVal(netBalance)}` : maskVal(netBalance)}
+                  </div>
+                  <div className="text-[8.5px] text-zinc-500 mt-0.5">
+                    Poupança: <strong className="text-zinc-800">{maskPercent(savingsRate)}</strong>
+                  </div>
+                </div>
+
+                <div className="bg-zinc-50 border border-zinc-200 rounded-lg p-2.5">
+                  <div className="flex items-center justify-between text-zinc-500 mb-0.5">
+                    <span className="text-[9px] font-bold uppercase tracking-wider">Em Contas</span>
+                    <Wallet className="w-3.5 h-3.5 text-zinc-700" />
+                  </div>
+                  <div className="text-sm font-black text-zinc-900">
+                    {maskVal(totalAccountBalance)}
+                  </div>
+                  <div className="text-[8.5px] text-zinc-500 mt-0.5">
+                    {accounts.length} contas bancárias
+                  </div>
                 </div>
               </div>
 
-              {/* Patrimônio em Contas */}
-              <div className="bg-zinc-50 border border-zinc-200 rounded-lg p-3">
-                <div className="flex items-center justify-between text-zinc-500 mb-1">
-                  <span className="text-[10px] font-bold uppercase tracking-wider">Saldo em Contas</span>
-                  <Wallet className="w-3.5 h-3.5 text-zinc-700" />
-                </div>
-                <div className="text-base font-extrabold text-zinc-900">
-                  {maskVal(totalAccountBalance)}
-                </div>
-                <div className="text-[9px] text-zinc-500 mt-1">
-                  {accounts.length} contas bancárias ativas
-                </div>
-              </div>
-            </div>
-
-            {/* Gráficos do Resumo Mensal */}
-            <div className="grid grid-cols-2 gap-5 mb-6">
-              
-              {/* Gráfico 1: Balanço Visual Proporcional Receita vs Despesa */}
-              <div className="border border-zinc-200 rounded-lg p-4 bg-zinc-50/50 flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center justify-between mb-3">
-                    <h3 className="text-xs font-extrabold text-zinc-900 uppercase tracking-wider">
-                      Balanço de Fluxo no Mês
+              {/* SEÇÃO 1 DE GRÁFICOS: Balanço & 50/30/20 */}
+              <div className="grid grid-cols-2 gap-3 mb-4">
+                {/* Balanço Entradas vs Saídas */}
+                <div className="border border-zinc-200 rounded-lg p-3 bg-zinc-50/50">
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-[11px] font-black text-zinc-900 uppercase tracking-wider flex items-center gap-1.5">
+                      <BarChart3 className="w-3.5 h-3.5 text-zinc-700" />
+                      <span>Balanço de Fluxo no Mês</span>
                     </h3>
-                    <span className="text-[10px] font-bold text-zinc-500">
+                    <span className="text-[9px] font-bold text-zinc-500">
                       {monthTransactions.length} lançamentos
                     </span>
                   </div>
 
-                  {/* Comparativo de Barras */}
-                  <div className="space-y-3">
+                  <div className="space-y-2">
                     <div>
-                      <div className="flex justify-between text-xs mb-1">
+                      <div className="flex justify-between text-[10px] mb-0.5">
                         <span className="font-semibold text-zinc-700">Entradas / Receitas</span>
                         <span className="font-bold text-emerald-700">{maskVal(totalIncome)}</span>
                       </div>
-                      <div className="w-full bg-zinc-200 h-3 rounded-full overflow-hidden">
+                      <div className="w-full bg-zinc-200 h-2 rounded-full overflow-hidden">
                         <div 
                           className="bg-emerald-500 h-full rounded-full transition-all"
                           style={{ width: `${totalIncome + totalExpense > 0 ? (totalIncome / (totalIncome + totalExpense)) * 100 : 50}%` }}
@@ -420,11 +603,11 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
                     </div>
 
                     <div>
-                      <div className="flex justify-between text-xs mb-1">
+                      <div className="flex justify-between text-[10px] mb-0.5">
                         <span className="font-semibold text-zinc-700">Saídas / Despesas</span>
                         <span className="font-bold text-rose-700">{maskVal(totalExpense)}</span>
                       </div>
-                      <div className="w-full bg-zinc-200 h-3 rounded-full overflow-hidden">
+                      <div className="w-full bg-zinc-200 h-2 rounded-full overflow-hidden">
                         <div 
                           className="bg-rose-500 h-full rounded-full transition-all"
                           style={{ width: `${totalIncome + totalExpense > 0 ? (totalExpense / (totalIncome + totalExpense)) * 100 : 50}%` }}
@@ -432,34 +615,32 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
                       </div>
                     </div>
                   </div>
+
+                  <div className="mt-2.5 pt-2 border-t border-zinc-200 flex justify-between items-center text-[10px]">
+                    <span className="text-zinc-600">Margem Líquida Retida:</span>
+                    <span className="font-bold text-zinc-900">
+                      {maskPercent(savingsRate)} do total ganho
+                    </span>
+                  </div>
                 </div>
 
-                {/* Síntese percentual */}
-                <div className="mt-4 pt-3 border-t border-zinc-200 flex justify-between items-center text-[11px]">
-                  <span className="text-zinc-600">Eficiência de Poupança:</span>
-                  <span className="font-bold text-zinc-900">
-                    {maskPercent(savingsRate)} do total ganho guardado
-                  </span>
-                </div>
-              </div>
-
-              {/* Gráfico 2: Metodologia de Equilíbrio 50 / 30 / 20 */}
-              <div className="border border-zinc-200 rounded-lg p-4 bg-zinc-50/50 flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center justify-between mb-3">
-                    <h3 className="text-xs font-extrabold text-zinc-900 uppercase tracking-wider">
-                      Equilíbrio de Gastos (50/30/20)
+                {/* 50 / 30 / 20 */}
+                <div className="border border-zinc-200 rounded-lg p-3 bg-zinc-50/50">
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-[11px] font-black text-zinc-900 uppercase tracking-wider flex items-center gap-1.5">
+                      <Target className="w-3.5 h-3.5 text-zinc-700" />
+                      <span>Equilíbrio de Gastos (50/30/20)</span>
                     </h3>
-                    <span className="text-[10px] font-bold text-zinc-500">Benchmark</span>
+                    <span className="text-[9px] font-bold text-zinc-500">Benchmark</span>
                   </div>
 
-                  <div className="space-y-2.5 text-xs">
+                  <div className="space-y-1.5 text-xs">
                     <div>
-                      <div className="flex justify-between text-[11px] mb-0.5">
-                        <span className="text-zinc-600">Necessidades Essenciais (Meta: 50%)</span>
+                      <div className="flex justify-between text-[10px] mb-0.5">
+                        <span className="text-zinc-600">Essenciais (Meta: 50%)</span>
                         <span className="font-bold text-zinc-900">{maskPercent(needsPercent)}</span>
                       </div>
-                      <div className="w-full bg-zinc-200 h-2 rounded-full overflow-hidden">
+                      <div className="w-full bg-zinc-200 h-1.5 rounded-full overflow-hidden">
                         <div 
                           className={`h-full rounded-full ${needsPercent <= 55 ? 'bg-zinc-800' : 'bg-amber-500'}`}
                           style={{ width: `${Math.min(100, needsPercent)}%` }}
@@ -468,11 +649,11 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
                     </div>
 
                     <div>
-                      <div className="flex justify-between text-[11px] mb-0.5">
+                      <div className="flex justify-between text-[10px] mb-0.5">
                         <span className="text-zinc-600">Desejos & Lazer (Meta: 30%)</span>
                         <span className="font-bold text-zinc-900">{maskPercent(wantsPercent)}</span>
                       </div>
-                      <div className="w-full bg-zinc-200 h-2 rounded-full overflow-hidden">
+                      <div className="w-full bg-zinc-200 h-1.5 rounded-full overflow-hidden">
                         <div 
                           className={`h-full rounded-full ${wantsPercent <= 35 ? 'bg-zinc-800' : 'bg-rose-500'}`}
                           style={{ width: `${Math.min(100, wantsPercent)}%` }}
@@ -481,11 +662,11 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
                     </div>
 
                     <div>
-                      <div className="flex justify-between text-[11px] mb-0.5">
-                        <span className="text-zinc-600">Poupança & Futuro (Meta: 20%)</span>
+                      <div className="flex justify-between text-[10px] mb-0.5">
+                        <span className="text-zinc-600">Poupança (Meta: 20%)</span>
                         <span className="font-bold text-emerald-700">{maskPercent(savingsRate)}</span>
                       </div>
-                      <div className="w-full bg-zinc-200 h-2 rounded-full overflow-hidden">
+                      <div className="w-full bg-zinc-200 h-1.5 rounded-full overflow-hidden">
                         <div 
                           className="h-full bg-emerald-500 rounded-full"
                           style={{ width: `${Math.min(100, savingsRate)}%` }}
@@ -493,166 +674,385 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
                       </div>
                     </div>
                   </div>
-                </div>
 
-                <div className="mt-3 pt-2.5 border-t border-zinc-200 text-[10px] text-zinc-500">
-                  {savingsRate >= 20 ? '• Padrão de poupança exemplar no mês.' : '• Sugestão: reduzir gastos discricionários em 5%.'}
+                  <div className="mt-2 pt-1.5 border-t border-zinc-200 text-[9px] text-zinc-500">
+                    {savingsRate >= 20 ? '• Padrão exemplar de poupança no mês.' : '• Sugestão: reduzir gastos discricionários em 5%.'}
+                  </div>
                 </div>
               </div>
-            </div>
 
-            {/* Gráfico 3: Distribuição Detalhada de Despesas por Categoria */}
-            <div className="border border-zinc-200 rounded-lg p-4 mb-6">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-xs font-extrabold text-zinc-900 uppercase tracking-wider flex items-center gap-1.5">
-                  <PieIcon className="w-3.5 h-3.5 text-zinc-700" />
-                  <span>Distribuição de Gastos por Categoria</span>
-                </h3>
-                <span className="text-[11px] font-bold text-zinc-600">
-                  Total Despesas: <strong className="text-zinc-900">{maskVal(totalExpense)}</strong>
-                </span>
-              </div>
+              {/* SEÇÃO 2 DE GRÁFICOS: Evolução Semanal & Meios de Pagamento */}
+              <div className="grid grid-cols-2 gap-3 mb-4">
+                {/* Evolução Semanal */}
+                <div className="border border-zinc-200 rounded-lg p-3 bg-zinc-50/50">
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-[11px] font-black text-zinc-900 uppercase tracking-wider flex items-center gap-1.5">
+                      <Clock className="w-3.5 h-3.5 text-zinc-700" />
+                      <span>Evolução de Gastos por Semana</span>
+                    </h3>
+                    <span className="text-[9px] font-bold text-zinc-500">Picos de Saída</span>
+                  </div>
 
-              {sortedCategories.length === 0 ? (
-                <p className="text-xs text-zinc-400 py-3 text-center">Nenhuma despesa registrada neste período.</p>
-              ) : (
-                <div className="grid grid-cols-2 gap-x-6 gap-y-2.5">
-                  {sortedCategories.map(cat => (
-                    <div key={cat.id} className="text-xs">
-                      <div className="flex items-center justify-between mb-0.5">
-                        <span className="font-medium text-zinc-700 truncate max-w-[180px]">
-                          {cat.name}
-                        </span>
-                        <span className="font-bold text-zinc-900">
-                          {maskVal(cat.amount)} <span className="text-zinc-500 font-normal">({maskPercent(cat.percentage)})</span>
-                        </span>
-                      </div>
-                      <div className="w-full bg-zinc-100 h-2 rounded-full overflow-hidden">
-                        <div
-                          className="h-full rounded-full"
-                          style={{ 
-                            width: `${Math.min(100, cat.percentage)}%`,
-                            backgroundColor: cat.color || '#18181b'
-                          }}
-                        />
-                      </div>
+                  <div className="space-y-1.5 text-xs">
+                    {weeklyExpenses.map((week, idx) => {
+                      const pctOfTotal = totalExpense > 0 ? (week.amount / totalExpense) * 100 : 0;
+                      return (
+                        <div key={idx}>
+                          <div className="flex justify-between text-[10px] mb-0.5">
+                            <span className="text-zinc-700 font-medium">{week.label} ({week.days})</span>
+                            <span className="font-bold text-zinc-900">
+                              {maskVal(week.amount)} <span className="text-zinc-500 font-normal">({maskPercent(pctOfTotal)})</span>
+                            </span>
+                          </div>
+                          <div className="w-full bg-zinc-200 h-1.5 rounded-full overflow-hidden">
+                            <div 
+                              className="h-full rounded-full bg-zinc-800"
+                              style={{ width: `${Math.min(100, (week.amount / highestWeekly) * 100)}%` }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Formas de Pagamento */}
+                <div className="border border-zinc-200 rounded-lg p-3 bg-zinc-50/50">
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-[11px] font-black text-zinc-900 uppercase tracking-wider flex items-center gap-1.5">
+                      <CreditCard className="w-3.5 h-3.5 text-zinc-700" />
+                      <span>Formas de Pagamento (Despesas)</span>
+                    </h3>
+                    <span className="text-[9px] font-bold text-zinc-500">Distribuição</span>
+                  </div>
+
+                  {sortedPaymentMethods.length === 0 ? (
+                    <p className="text-[11px] text-zinc-400 py-2 text-center">Sem dados de pagamento no período.</p>
+                  ) : (
+                    <div className="space-y-1.5 text-xs">
+                      {sortedPaymentMethods.slice(0, 4).map(item => (
+                        <div key={item.method}>
+                          <div className="flex justify-between text-[10px] mb-0.5">
+                            <span className="text-zinc-700 font-medium">{item.method}</span>
+                            <span className="font-bold text-zinc-900">
+                              {maskVal(item.amount)} <span className="text-zinc-500 font-normal">({maskPercent(item.percentage)})</span>
+                            </span>
+                          </div>
+                          <div className="w-full bg-zinc-200 h-1.5 rounded-full overflow-hidden">
+                            <div 
+                              className="h-full rounded-full bg-lime-600"
+                              style={{ width: `${Math.min(100, item.percentage)}%` }}
+                            />
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  )}
                 </div>
-              )}
-            </div>
+              </div>
 
-            {/* Tabela de Saldos em Contas Bancárias (se ativado) */}
-            {includeAccounts && (
-              <div className="border border-zinc-200 rounded-lg p-4 mb-6">
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-xs font-extrabold text-zinc-900 uppercase tracking-wider flex items-center gap-1.5">
-                    <Building2 className="w-3.5 h-3.5 text-zinc-700" />
-                    <span>Posição Consolidada por Conta Bancária</span>
+              {/* SEÇÃO 3: Distribuição por Categorias */}
+              <div className="border border-zinc-200 rounded-lg p-3">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-[11px] font-black text-zinc-900 uppercase tracking-wider flex items-center gap-1.5">
+                    <PieIcon className="w-3.5 h-3.5 text-zinc-700" />
+                    <span>Distribuição de Gastos por Categoria</span>
                   </h3>
-                  <span className="text-xs font-extrabold text-zinc-900">
-                    Disponibilidade Total: {maskVal(totalAccountBalance)}
+                  <span className="text-[10px] font-bold text-zinc-600">
+                    Total: <strong className="text-zinc-900">{maskVal(totalExpense)}</strong>
                   </span>
                 </div>
 
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs border-collapse">
-                    <thead>
-                      <tr className="border-b border-zinc-200 text-[10px] font-bold text-zinc-500 uppercase">
-                        <th className="py-1.5 px-2">Conta / Instituição</th>
-                        <th className="py-1.5 px-2">Tipo</th>
-                        <th className="py-1.5 px-2 text-right">Saldo Atual</th>
-                        <th className="py-1.5 px-2 text-right">Participação</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-zinc-100">
-                      {accounts.map(acc => {
-                        const share = totalAccountBalance > 0 ? (acc.balance / totalAccountBalance) * 100 : 0;
-                        return (
-                          <tr key={acc.id} className="hover:bg-zinc-50/50">
-                            <td className="py-2 px-2 font-semibold text-zinc-800">
-                              {acc.name} <span className="text-zinc-500 font-normal text-[11px]">({acc.institution})</span>
-                            </td>
-                            <td className="py-2 px-2 text-zinc-600 capitalize">
-                              {acc.type === 'checking' ? 'Corrente' : acc.type === 'savings' ? 'Poupança' : acc.type === 'investment' ? 'Investimento' : 'Carteira'}
-                            </td>
-                            <td className={`py-2 px-2 text-right font-bold ${acc.balance >= 0 ? 'text-zinc-900' : 'text-rose-700'}`}>
-                              {maskVal(acc.balance)}
-                            </td>
-                            <td className="py-2 px-2 text-right text-zinc-600 font-medium">
-                              {maskPercent(share)}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                {sortedCategories.length === 0 ? (
+                  <p className="text-[11px] text-zinc-400 py-2 text-center">Nenhuma despesa registrada neste período.</p>
+                ) : (
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                    {sortedCategories.slice(0, 8).map(cat => (
+                      <div key={cat.id} className="text-xs">
+                        <div className="flex items-center justify-between mb-0.5">
+                          <span className="font-medium text-zinc-700 truncate max-w-[170px] text-[10px]">
+                            {cat.name}
+                          </span>
+                          <span className="font-bold text-zinc-900 text-[10px]">
+                            {maskVal(cat.amount)} <span className="text-zinc-500 font-normal">({maskPercent(cat.percentage)})</span>
+                          </span>
+                        </div>
+                        <div className="w-full bg-zinc-100 h-1.5 rounded-full overflow-hidden">
+                          <div
+                            className="h-full rounded-full"
+                            style={{ 
+                              width: `${Math.min(100, cat.percentage)}%`,
+                              backgroundColor: cat.color || '#18181b'
+                            }}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
-            )}
+            </div>
 
-            {/* Tabela de Maiores Despesas do Mês (se ativado) */}
-            {includeTopExpenses && topExpenses.length > 0 && (
-              <div className="border border-zinc-200 rounded-lg p-4 mb-6">
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-xs font-extrabold text-zinc-900 uppercase tracking-wider flex items-center gap-1.5">
-                    <Layers className="w-3.5 h-3.5 text-zinc-700" />
-                    <span>Top 6 Maiores Despesas do Período</span>
-                  </h3>
-                  <span className="text-[10px] text-zinc-500">Classificadas por valor</span>
-                </div>
-
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs border-collapse">
-                    <thead>
-                      <tr className="border-b border-zinc-200 text-[10px] font-bold text-zinc-500 uppercase">
-                        <th className="py-1.5 px-2">Data</th>
-                        <th className="py-1.5 px-2">Descrição</th>
-                        <th className="py-1.5 px-2">Categoria</th>
-                        <th className="py-1.5 px-2">Método</th>
-                        <th className="py-1.5 px-2 text-right">Valor</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-zinc-100">
-                      {topExpenses.map(tx => {
-                        const cat = categoryMap.get(tx.category);
-                        return (
-                          <tr key={tx.id} className="hover:bg-zinc-50/50">
-                            <td className="py-2 px-2 text-zinc-600 whitespace-nowrap text-[11px]">
-                              {tx.date.split('-').reverse().join('/')}
-                            </td>
-                            <td className="py-2 px-2 font-semibold text-zinc-900">
-                              {tx.description}
-                            </td>
-                            <td className="py-2 px-2 text-zinc-600 text-[11px]">
-                              {cat?.name || 'Outros'}
-                            </td>
-                            <td className="py-2 px-2 text-zinc-600 text-[11px]">
-                              {tx.paymentMethod}
-                            </td>
-                            <td className="py-2 px-2 text-right font-bold text-rose-700">
-                              {maskVal(tx.amount)}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-
-            {/* Rodapé e Declaração de Auditoria */}
-            <div className="pt-4 border-t border-zinc-200 flex flex-col sm:flex-row items-center justify-between gap-2 text-[10px] text-zinc-500">
-              <div>
-                Documento gerado eletronicamente pela plataforma <strong className="text-zinc-700">FinControl</strong>.
-              </div>
-              <div className="flex items-center gap-1.5 text-zinc-400">
+            {/* Rodapé da Página 1 */}
+            <div className="pt-2.5 border-t border-zinc-200 flex items-center justify-between text-[9px] text-zinc-500 shrink-0">
+              <div className="flex items-center gap-1.5">
                 <Shield className="w-3 h-3 text-emerald-600" />
-                <span>Dados validados e auditados com segurança</span>
+                <span>Documento emitido eletronicamente via <strong className="text-zinc-700">FinControl</strong></span>
+              </div>
+              <div className="font-bold text-zinc-600">
+                Página 1 {reportFormat === '2pages' ? 'de 2' : 'de 1'}
               </div>
             </div>
           </div>
+
+          {/* ========================================================= */}
+          {/* PÁGINA 2: DETALHAMENTO DE DESPESAS, CONTAS & AUDITORIA   */}
+          {/* ========================================================= */}
+          {reportFormat === '2pages' && (
+            <div
+              ref={page2Ref}
+              id="report-page-2"
+              className="w-full max-w-[760px] bg-white text-zinc-900 p-8 sm:p-9 rounded-xl shadow-xl border border-zinc-200 font-sans print:shadow-none print:border-none print:m-0 print:p-6 flex flex-col justify-between"
+              style={{ minHeight: '1075px', maxHeight: '1075px', boxSizing: 'border-box' }}
+            >
+              <div>
+                {/* Minifita de Cabeçalho da Página 2 */}
+                <div className="flex items-center justify-between border-b-2 border-zinc-900 pb-3 mb-4">
+                  <div className="flex items-center gap-2">
+                    <div className="w-6 h-6 rounded-md bg-zinc-950 text-lime-400 flex items-center justify-center font-black text-xs">
+                      FC
+                    </div>
+                    <div>
+                      <h2 className="text-xs font-black text-zinc-950 tracking-tight leading-none">
+                        FinControl — Detalhamento Operacional & Posição Patrimonial
+                      </h2>
+                      <span className="text-[9px] text-zinc-500 font-medium">
+                        Período: <strong className="capitalize text-zinc-800">{formatMonthYear(currentMonth)}</strong>
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="text-right text-[10px] text-zinc-500">
+                    <span>Despesas Totais: <strong className="text-rose-700 font-black">{maskVal(totalExpense)}</strong></span>
+                  </div>
+                </div>
+
+                {/* SEÇÃO 4: TOP 6 MAIORES DESPESAS DO MÊS (100% REFORMULADO E ALINHADO) */}
+                {includeTopExpenses && (
+                  <div className="border border-zinc-200 rounded-lg p-3.5 mb-4">
+                    <div className="flex items-center justify-between mb-2.5">
+                      <div>
+                        <h3 className="text-xs font-black text-zinc-900 uppercase tracking-wider flex items-center gap-1.5">
+                          <Award className="w-4 h-4 text-amber-500" />
+                          <span>Top 6 Maiores Despesas do Mês</span>
+                        </h3>
+                        <p className="text-[9.5px] text-zinc-500">
+                          Classificadas por valor para identificação imediata dos maiores centros de custo
+                        </p>
+                      </div>
+                      <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-zinc-100 text-zinc-700 border border-zinc-200">
+                        Ranking Individual
+                      </span>
+                    </div>
+
+                    {topExpenses.length === 0 ? (
+                      <div className="text-center py-5 text-zinc-400 text-xs bg-zinc-50 rounded-lg border border-zinc-150">
+                        Nenhuma despesa registrada no mês selecionado.
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {topExpenses.map((tx, index) => {
+                          const catInfo = getCategoryInfo(tx.category);
+                          const acc = accountMap.get(tx.accountId);
+                          const impactOfTotal = totalExpense > 0 ? (tx.numAmount / totalExpense) * 100 : 0;
+                          const relativeWidth = (tx.numAmount / highestSingleExpense) * 100;
+
+                          const rankStyle = 
+                            index === 0 ? 'bg-amber-100 text-amber-900 border-amber-300 font-black' :
+                            index === 1 ? 'bg-zinc-200 text-zinc-900 border-zinc-300 font-bold' :
+                            index === 2 ? 'bg-orange-100 text-orange-900 border-orange-300 font-bold' :
+                            'bg-zinc-100 text-zinc-700 border-zinc-200 font-semibold';
+
+                          return (
+                            <div 
+                              key={tx.id || index}
+                              className="bg-zinc-50/70 border border-zinc-200/90 rounded-lg p-2 hover:bg-zinc-100/50 transition-colors"
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                {/* Lado Esquerdo */}
+                                <div className="flex items-center gap-2.5 min-w-0">
+                                  <span className={`w-5 h-5 rounded-md flex items-center justify-center text-[9px] border shrink-0 ${rankStyle}`}>
+                                    #{index + 1}
+                                  </span>
+                                  
+                                  <div className="min-w-0">
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-bold text-zinc-950 text-[11px] truncate max-w-[260px]">
+                                        {tx.description || 'Despesa sem descrição'}
+                                      </span>
+                                      
+                                      <span className={`text-[8px] font-bold px-1.5 py-0.2 rounded-full border shrink-0 ${tx.status === 'paid' ? 'bg-emerald-100 text-emerald-800 border-emerald-300' : 'bg-amber-100 text-amber-800 border-amber-300'}`}>
+                                        {tx.status === 'paid' ? 'Pago' : 'Pendente'}
+                                      </span>
+                                    </div>
+
+                                    <div className="flex items-center gap-1.5 text-[9.5px] text-zinc-500 mt-0.5">
+                                      <span className="flex items-center gap-1 font-semibold" style={{ color: catInfo.color }}>
+                                        <span className="w-1.5 h-1.5 rounded-full inline-block" style={{ backgroundColor: catInfo.color }} />
+                                        {catInfo.name}
+                                      </span>
+                                      <span>•</span>
+                                      <span>{formatDateBR(tx.date)}</span>
+                                      {acc && (
+                                        <>
+                                          <span>•</span>
+                                          <span className="truncate max-w-[110px]">{acc.name}</span>
+                                        </>
+                                      )}
+                                      {tx.paymentMethod && (
+                                        <>
+                                          <span>•</span>
+                                          <span>{tx.paymentMethod}</span>
+                                        </>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Lado Direito: Valor e % */}
+                                <div className="text-right shrink-0">
+                                  <div className="text-xs font-black text-rose-700">
+                                    {maskVal(tx.numAmount)}
+                                  </div>
+                                  <span className="text-[9px] font-bold text-zinc-500">
+                                    {maskPercent(impactOfTotal)} das despesas
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* Barra Proporcional */}
+                              <div className="w-full bg-zinc-200/80 h-1.5 rounded-full overflow-hidden mt-1.5">
+                                <div 
+                                  className="h-full rounded-full bg-rose-500"
+                                  style={{ width: `${Math.min(100, Math.max(5, relativeWidth))}%` }}
+                                />
+                              </div>
+
+                              {/* Frase direta solicitada pelo usuário */}
+                              <div className="mt-1.5 pt-1 border-t border-zinc-200/50 flex items-center justify-between text-[9px] text-zinc-600">
+                                <span>
+                                  Esse mês gastou <strong className="text-zinc-950 font-bold">{maskPercent(impactOfTotal)}</strong> ({maskVal(tx.numAmount)}) em <strong className="text-zinc-950 font-bold">{tx.description || 'este item'}</strong>
+                                </span>
+                                <span className="font-semibold text-zinc-400">#{index + 1} no mês</span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* SEÇÃO 5: Saldos por Conta Bancária */}
+                {includeAccounts && accounts.length > 0 && (
+                  <div className="border border-zinc-200 rounded-lg p-3.5 mb-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <h3 className="text-xs font-black text-zinc-900 uppercase tracking-wider flex items-center gap-1.5">
+                        <Building2 className="w-3.5 h-3.5 text-zinc-700" />
+                        <span>Posição Consolidada por Conta Bancária</span>
+                      </h3>
+                      <span className="text-[11px] font-extrabold text-zinc-900">
+                        Disponibilidade Total: {maskVal(totalAccountBalance)}
+                      </span>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs border-collapse">
+                        <thead>
+                          <tr className="border-b border-zinc-200 text-[9px] font-bold text-zinc-500 uppercase">
+                            <th className="py-1 px-2">Conta / Instituição</th>
+                            <th className="py-1 px-2">Tipo</th>
+                            <th className="py-1 px-2 text-right">Saldo Atual</th>
+                            <th className="py-1 px-2 text-right">Participação</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-zinc-100">
+                          {accounts.map(acc => {
+                            const balance = Number(acc.balance || 0);
+                            const share = totalAccountBalance > 0 ? (balance / totalAccountBalance) * 100 : 0;
+                            return (
+                              <tr key={acc.id} className="hover:bg-zinc-50/50">
+                                <td className="py-1.5 px-2 font-semibold text-zinc-800 text-[10.5px]">
+                                  {acc.name} <span className="text-zinc-500 font-normal text-[9.5px]">({acc.institution})</span>
+                                </td>
+                                <td className="py-1.5 px-2 text-zinc-600 capitalize text-[10px]">
+                                  {acc.type === 'checking' ? 'Corrente' : acc.type === 'savings' ? 'Poupança' : acc.type === 'investment' ? 'Investimento' : 'Carteira'}
+                                </td>
+                                <td className={`py-1.5 px-2 text-right font-bold text-[11px] ${balance >= 0 ? 'text-zinc-900' : 'text-rose-700'}`}>
+                                  {maskVal(balance)}
+                                </td>
+                                <td className="py-1.5 px-2 text-right text-zinc-600 font-medium text-[10px]">
+                                  {maskPercent(share)}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* SEÇÃO 6: Resumo de Obrigações e Contas a Pagar do Mês */}
+                {bills.length > 0 && (
+                  <div className="border border-zinc-200 rounded-lg p-3 mb-4 bg-zinc-50/50">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <h3 className="text-[11px] font-black text-zinc-900 uppercase tracking-wider flex items-center gap-1.5">
+                        <Receipt className="w-3.5 h-3.5 text-zinc-700" />
+                        <span>Compromissos Recorrentes & Parcelamentos</span>
+                      </h3>
+                      <span className="text-[9.5px] font-bold text-zinc-600">
+                        {bills.length} contas cadastradas
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                      <div className="bg-white border border-zinc-200/80 rounded-md p-2">
+                        <span className="text-[9px] text-zinc-500 uppercase font-bold block">Compromisso Total</span>
+                        <span className="font-extrabold text-zinc-900 text-xs">
+                          {maskVal(bills.reduce((sum, b) => sum + Number(b.installmentAmount || 0), 0))}
+                        </span>
+                      </div>
+                      <div className="bg-white border border-zinc-200/80 rounded-md p-2">
+                        <span className="text-[9px] text-zinc-500 uppercase font-bold block">Já Pagas no Mês</span>
+                        <span className="font-extrabold text-emerald-700 text-xs">
+                          {bills.filter(b => b.lastPaidMonth === currentMonth).length} quitadas
+                        </span>
+                      </div>
+                      <div className="bg-white border border-zinc-200/80 rounded-md p-2">
+                        <span className="text-[9px] text-zinc-500 uppercase font-bold block">Pendentes</span>
+                        <span className="font-extrabold text-amber-700 text-xs">
+                          {bills.filter(b => b.lastPaidMonth !== currentMonth).length} a vencer
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Rodapé e Autenticação da Página 2 */}
+              <div className="pt-2.5 border-t border-zinc-200 flex items-center justify-between text-[9px] text-zinc-500 shrink-0">
+                <div className="flex items-center gap-1.5">
+                  <Shield className="w-3 h-3 text-emerald-600" />
+                  <span>Dados consolidados pelo banco de dados FinControl • Certificado digital de integridade</span>
+                </div>
+                <div className="font-bold text-zinc-600">
+                  Página 2 de 2
+                </div>
+              </div>
+            </div>
+          )}
+
         </div>
 
       </div>

@@ -10,7 +10,8 @@ export function formatCurrency(value: number, privacyMode = false): string {
 
 export function formatDateBR(dateString: string): string {
   if (!dateString) return '';
-  const [year, month, day] = dateString.split('-');
+  const cleanDate = dateString.split('T')[0].split(' ')[0];
+  const [year, month, day] = cleanDate.split('-');
   if (!year || !month || !day) return dateString;
   return `${day}/${month}/${year}`;
 }
