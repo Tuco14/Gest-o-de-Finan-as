@@ -11,7 +11,9 @@ import {
   INITIAL_CATEGORIES, 
   INITIAL_ACCOUNTS, 
   INITIAL_TRANSACTIONS, 
-  INITIAL_GOALS 
+  INITIAL_GOALS,
+  INITIAL_BILLS,
+  OCTOBER_CYCLE_TRANSACTIONS
 } from './utils/initialData';
 import { Header } from './components/Header';
 import { MetricCards } from './components/MetricCards';
@@ -34,7 +36,9 @@ import {
   FileSpreadsheet, 
   Sparkles, 
   Shield,
-  Bot
+  Bot,
+  AlertTriangle,
+  CalendarCheck
 } from 'lucide-react';
 import { 
   auth, 
@@ -55,16 +59,21 @@ import { AuthModal } from './components/AuthModal';
 import { MonthlyReportModal } from './components/MonthlyReportModal';
 import { AIChatModal } from './components/AIChatModal';
 
-const APP_STORAGE_VERSION = 'fincontrol_v2_zeroed';
+const APP_STORAGE_VERSION = 'fincontrol_v4_october_cycle';
 
-// Se for primeira vez com a versão limpa, remove os dados de demonstração anteriores
+// Inicializa o ciclo de outubro como ciclo ativo pendente de fechamento
 if (typeof window !== 'undefined') {
   const currentVersion = localStorage.getItem('fincontrol_version');
   if (currentVersion !== APP_STORAGE_VERSION) {
-    localStorage.removeItem('fincontrol_transactions');
-    localStorage.removeItem('fincontrol_categories');
-    localStorage.removeItem('fincontrol_accounts');
-    localStorage.removeItem('fincontrol_goals');
+    const existingTxsStr = localStorage.getItem('fincontrol_transactions');
+    let existingList: Transaction[] = [];
+    if (existingTxsStr) {
+      try { existingList = JSON.parse(existingTxsStr); } catch {}
+    }
+    // Garante as transações do ciclo de outubro sem duplicar
+    const mergedTxs = deduplicateById([...OCTOBER_CYCLE_TRANSACTIONS, ...existingList]);
+    localStorage.setItem('fincontrol_transactions', JSON.stringify(mergedTxs));
+    localStorage.setItem('fincontrol_current_month', '2026-10');
     localStorage.setItem('fincontrol_version', APP_STORAGE_VERSION);
   }
 }
@@ -120,20 +129,24 @@ export default function App() {
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return deduplicateById<PayableBill>(parsed);
+        if (Array.isArray(parsed) && parsed.length > 0) return deduplicateById<PayableBill>(parsed);
       } catch (e) {
         console.error(e);
       }
     }
-    return [];
+    return INITIAL_BILLS;
   });
 
+  // Estado do mês ativo: inicia em Outubro ('2026-10') para que o usuário finalize o mês antes de Novembro
   const [currentMonth, setCurrentMonth] = useState<string>(() => {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    return `${year}-${month}`;
+    const saved = localStorage.getItem('fincontrol_current_month');
+    if (saved) return saved;
+    return '2026-10';
   });
+
+  useEffect(() => {
+    localStorage.setItem('fincontrol_current_month', currentMonth);
+  }, [currentMonth]);
 
   // Lista de meses que tiveram seu ciclo salarial finalizado
   const [finalizedMonths, setFinalizedMonths] = useState<string[]>(() => {
@@ -1420,6 +1433,47 @@ export default function App() {
         isSyncing={isSyncing}
         isMonthFinalized={finalizedMonths.includes(currentMonth)}
       />
+
+      {/* Banner de Ciclo Salarial Ativo / Pendente de Fechamento */}
+      {!finalizedMonths.includes('2026-10') && currentMonth === '2026-10' && (
+        <div className="bg-lime-950/40 border-b border-lime-500/30 px-4 py-2.5">
+          <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-lime-200">
+            <div className="flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-lime-400 shrink-0" />
+              <span>
+                <strong>Ciclo Salarial de Outubro Ativo:</strong> Compras feitas até o 5º dia útil de Novembro estão computadas neste ciclo. Clique em <strong>Finalizar Mês</strong> para fechar o balanço e iniciar Novembro.
+              </span>
+            </div>
+            <button
+              onClick={() => setIsReportModalOpen(true)}
+              className="px-3.5 py-1.5 bg-lime-400 hover:bg-lime-300 text-zinc-950 font-bold rounded-xl text-xs cursor-pointer shrink-0 transition-all shadow-xs flex items-center gap-1.5 active:scale-98"
+            >
+              <CalendarCheck className="w-3.5 h-3.5" />
+              <span>Finalizar Mês de Outubro</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {!finalizedMonths.includes('2026-10') && currentMonth === '2026-11' && (
+        <div className="bg-amber-950/40 border-b border-amber-500/30 px-4 py-2.5">
+          <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-amber-200">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+              <span>
+                <strong>Atenção:</strong> O ciclo salarial de Outubro ainda está em aberto. Como o salário cai a partir do 5º dia útil, finalize Outubro antes de iniciar os lançamentos de Novembro.
+              </span>
+            </div>
+            <button
+              onClick={() => setCurrentMonth('2026-10')}
+              className="px-3.5 py-1.5 bg-amber-400 hover:bg-amber-300 text-zinc-950 font-bold rounded-xl text-xs cursor-pointer shrink-0 transition-all shadow-xs flex items-center gap-1.5 active:scale-98"
+            >
+              <CalendarCheck className="w-3.5 h-3.5" />
+              <span>Ir para Ciclo de Outubro</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Conteúdo Principal */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">

@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { Transaction, Account, Category, FinancialGoal, PayableBill } from '../types';
 import { formatCurrency, formatMonthYear, formatDateBR } from '../utils/formatters';
 import { 
@@ -80,16 +80,11 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
     ? `${year + 1}-01` 
     : `${year}-${String(month + 1).padStart(2, '0')}`;
 
-  const defaultCutoff = () => {
-    const now = new Date();
-    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    if (todayStr.startsWith(nextMonth)) {
-      return todayStr;
-    }
-    return `${nextMonth}-06`;
-  };
+  const [cutoffDate, setCutoffDate] = useState<string>(() => `${nextMonth}-06`);
 
-  const [cutoffDate, setCutoffDate] = useState<string>(defaultCutoff);
+  useEffect(() => {
+    setCutoffDate(`${nextMonth}-06`);
+  }, [currentMonth, nextMonth]);
 
   if (!isOpen) return null;
 

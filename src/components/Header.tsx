@@ -127,8 +127,17 @@ export const Header: React.FC<HeaderProps> = ({
               className="flex items-center gap-1.5 px-3 py-1 text-xs font-semibold text-zinc-200 hover:bg-zinc-700 rounded-lg transition-colors cursor-pointer"
               title="Clique para voltar ao mês atual"
             >
-              <Calendar className="w-3.5 h-3.5 text-lime-400" />
-              <span>{formatMonthYear(currentMonth)}</span>
+              <Calendar className="w-3.5 h-3.5 text-lime-400 shrink-0" />
+              <span className="truncate">{formatMonthYear(currentMonth)}</span>
+              {isMonthFinalized ? (
+                <span className="text-[9px] px-1.5 py-0.5 rounded-sm bg-emerald-500/20 text-emerald-300 font-bold hidden sm:inline">
+                  Fechado
+                </span>
+              ) : (
+                <span className="text-[9px] px-1.5 py-0.5 rounded-sm bg-lime-400/20 text-lime-400 font-bold hidden sm:inline">
+                  Em Aberto
+                </span>
+              )}
             </button>
 
             <button
