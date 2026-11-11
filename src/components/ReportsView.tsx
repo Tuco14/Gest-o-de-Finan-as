@@ -20,6 +20,7 @@ interface ReportsViewProps {
   transactions: Transaction[];
   categories: Category[];
   accounts?: Account[];
+  availableBalance?: number;
   currentMonth: string;
   privacyMode: boolean;
   onOpenMonthlyReport?: () => void;
@@ -29,6 +30,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   transactions,
   categories,
   accounts = [],
+  availableBalance,
   currentMonth,
   privacyMode,
   onOpenMonthlyReport,
@@ -122,25 +124,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     );
   }, [accounts]);
 
-  const mainAccountBalanceAtCycleEnd = useMemo(() => {
-    if (!mainAccount) return 0;
-    const baseBal = typeof mainAccount.initialBalance === 'number'
-      ? mainAccount.initialBalance
-      : (typeof mainAccount.balance === 'number' ? mainAccount.balance : 0);
-
-    const txsUpToCycle = transactions.filter(t => {
-      if (!t || t.accountId !== mainAccount.id || t.status !== 'paid') return false;
-      if (t.cycleMonth) return t.cycleMonth <= currentMonth;
-      return (t.date || '').startsWith(currentMonth);
-    });
-
-    const txDelta = txsUpToCycle.reduce((sum, t) => {
-      const val = Number(t.amount) || 0;
-      return sum + (t.type === 'income' ? val : -val);
-    }, 0);
-
-    return Math.round((baseBal + txDelta) * 100) / 100;
-  }, [mainAccount, transactions, currentMonth]);
+  const mainAccountBalanceAtCycleEnd = typeof availableBalance === 'number'
+    ? availableBalance
+    : Number(mainAccount?.balance || 0);
 
   return (
     <div className="space-y-6">

@@ -1599,6 +1599,7 @@ export default function App() {
               transactions={transactions}
               categories={categories}
               accounts={accountsWithLiveBalances}
+              availableBalance={monthlyMetrics.totalBalance}
               currentMonth={currentMonth}
               privacyMode={privacyMode}
               onOpenMonthlyReport={() => setIsReportModalOpen(true)}
@@ -1702,6 +1703,7 @@ export default function App() {
         categories={categories}
         goals={goals}
         bills={bills}
+        availableBalance={monthlyMetrics.totalBalance}
         userEmail={currentUser?.email || localUser?.email}
         onToast={showToast}
         isMonthFinalized={finalizedMonths.includes(currentMonth)}

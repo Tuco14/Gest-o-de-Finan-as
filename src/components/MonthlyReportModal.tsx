@@ -42,6 +42,7 @@ interface MonthlyReportModalProps {
   categories: Category[];
   goals: FinancialGoal[];
   bills?: PayableBill[];
+  availableBalance?: number;
   userEmail?: string | null;
   onToast: (msg: string) => void;
   isMonthFinalized?: boolean;
@@ -58,6 +59,7 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
   categories,
   goals,
   bills = [],
+  availableBalance,
   userEmail,
   onToast,
   isMonthFinalized = false,
@@ -196,24 +198,10 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
     accounts.find(a => a.type !== 'credit') ||
     accounts[0];
 
-  // Saldo final da conta principal ao fim deste ciclo salarial:
-  // Considera o saldo base somado às receitas pagas e subtraído das despesas pagas até o corte deste ciclo
-  const baseBal = typeof mainAccount?.initialBalance === 'number'
-    ? mainAccount.initialBalance
-    : (typeof mainAccount?.balance === 'number' ? mainAccount.balance : 0);
-
-  const txsUpToCycle = transactions.filter(t => {
-    if (!t || !mainAccount || t.accountId !== mainAccount.id || t.status !== 'paid') return false;
-    if (t.cycleMonth) return t.cycleMonth <= currentMonth;
-    return (t.date || '') <= (cutoffDate || `${currentMonth}-31`);
-  });
-
-  const txDelta = txsUpToCycle.reduce((sum, t) => {
-    const val = Number(t.amount) || 0;
-    return sum + (t.type === 'income' ? val : -val);
-  }, 0);
-
-  const mainAccountBalanceAtCycleEnd = Math.round((baseBal + txDelta) * 100) / 100;
+  // Saldo final da conta principal ao fim do ciclo é exatamente o Saldo Disponível da conta principal
+  const mainAccountBalanceAtCycleEnd = typeof availableBalance === 'number'
+    ? availableBalance
+    : Number(mainAccount?.balance || 0);
 
   // 3. Ordenar categorias por maior despesa
   const sortedCategories = Object.entries(categoryExpenses)
