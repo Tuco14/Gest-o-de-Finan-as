@@ -1598,6 +1598,7 @@ export default function App() {
             <ReportsView
               transactions={transactions}
               categories={categories}
+              accounts={accountsWithLiveBalances}
               currentMonth={currentMonth}
               privacyMode={privacyMode}
               onOpenMonthlyReport={() => setIsReportModalOpen(true)}

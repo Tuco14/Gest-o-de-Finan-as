@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { Transaction, Category } from '../types';
+import { Transaction, Category, Account } from '../types';
 import { formatCurrency, formatMonthYear, deduplicateById, isTransactionInCycle } from '../utils/formatters';
 import { 
   BarChart3, 
@@ -12,12 +12,14 @@ import {
   CheckCircle2,
   PieChart,
   FileText,
-  CalendarCheck
+  CalendarCheck,
+  Landmark
 } from 'lucide-react';
 
 interface ReportsViewProps {
   transactions: Transaction[];
   categories: Category[];
+  accounts?: Account[];
   currentMonth: string;
   privacyMode: boolean;
   onOpenMonthlyReport?: () => void;
@@ -26,6 +28,7 @@ interface ReportsViewProps {
 export const ReportsView: React.FC<ReportsViewProps> = ({
   transactions,
   categories,
+  accounts = [],
   currentMonth,
   privacyMode,
   onOpenMonthlyReport,
@@ -107,6 +110,38 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     };
   }, [transactions, currentMonth]);
 
+  // Identificação e Saldo Final da Conta Principal ao Fim do Ciclo
+  const mainAccount = useMemo(() => {
+    if (!accounts || accounts.length === 0) return null;
+    return (
+      accounts.find(a => a.isMain) ||
+      accounts.find(a => (a.name && a.name.toLowerCase().includes('picpay')) || (a.institution && a.institution.toLowerCase().includes('picpay'))) ||
+      accounts.find(a => a.type === 'checking') ||
+      accounts.find(a => a.type !== 'credit') ||
+      accounts[0]
+    );
+  }, [accounts]);
+
+  const mainAccountBalanceAtCycleEnd = useMemo(() => {
+    if (!mainAccount) return 0;
+    const baseBal = typeof mainAccount.initialBalance === 'number'
+      ? mainAccount.initialBalance
+      : (typeof mainAccount.balance === 'number' ? mainAccount.balance : 0);
+
+    const txsUpToCycle = transactions.filter(t => {
+      if (!t || t.accountId !== mainAccount.id || t.status !== 'paid') return false;
+      if (t.cycleMonth) return t.cycleMonth <= currentMonth;
+      return (t.date || '').startsWith(currentMonth);
+    });
+
+    const txDelta = txsUpToCycle.reduce((sum, t) => {
+      const val = Number(t.amount) || 0;
+      return sum + (t.type === 'income' ? val : -val);
+    }, 0);
+
+    return Math.round((baseBal + txDelta) * 100) / 100;
+  }, [mainAccount, transactions, currentMonth]);
+
   return (
     <div className="space-y-6">
       {/* Top Banner: Score de Saúde Financeira */}
@@ -165,6 +200,33 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Card Executivo: Saldo Final da Conta Principal ao Fim do Ciclo */}
+      {mainAccount && (
+        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-md">
+          <div className="flex items-center gap-3.5">
+            <div className="w-11 h-11 rounded-2xl bg-lime-400/10 border border-lime-400/30 flex items-center justify-center text-lime-400 shrink-0">
+              <Landmark className="w-5 h-5" />
+            </div>
+            <div>
+              <span className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider block">
+                Saldo Final da Conta Principal ao Fim do Ciclo
+              </span>
+              <span className="text-base font-bold text-white">
+                {mainAccount.name} <span className="text-xs text-zinc-400 font-normal">({mainAccount.institution})</span>
+              </span>
+            </div>
+          </div>
+          <div className="text-left sm:text-right">
+            <span className="text-2xl font-black text-lime-400 block tracking-tight">
+              {formatCurrency(mainAccountBalanceAtCycleEnd, privacyMode)}
+            </span>
+            <span className="text-[11px] text-zinc-400">
+              Disponibilidade ao encerramento do ciclo de {formatMonthYear(currentMonth)}
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* Grid: 50/30/20 vs Maiores Gastos */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

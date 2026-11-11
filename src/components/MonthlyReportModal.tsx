@@ -27,7 +27,8 @@ import {
   CheckCircle2,
   ArrowRight,
   RotateCcw,
-  Info
+  Info,
+  Landmark
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas-pro';
@@ -186,6 +187,33 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
   const savingsRate = totalIncome > 0 ? Math.max(0, (netBalance / totalIncome) * 100) : 0;
   const totalAccountBalance = accounts.reduce((sum, a) => sum + Number(a.balance || 0), 0);
   const expenseLiquidityRate = totalExpense > 0 ? (paidExpense / totalExpense) * 100 : 100;
+
+  // Identificação e cálculo do Saldo Final da Conta Principal ao fim do ciclo
+  const mainAccount = 
+    accounts.find(a => a.isMain) ||
+    accounts.find(a => (a.name && a.name.toLowerCase().includes('picpay')) || (a.institution && a.institution.toLowerCase().includes('picpay'))) ||
+    accounts.find(a => a.type === 'checking') ||
+    accounts.find(a => a.type !== 'credit') ||
+    accounts[0];
+
+  // Saldo final da conta principal ao fim deste ciclo salarial:
+  // Considera o saldo base somado às receitas pagas e subtraído das despesas pagas até o corte deste ciclo
+  const baseBal = typeof mainAccount?.initialBalance === 'number'
+    ? mainAccount.initialBalance
+    : (typeof mainAccount?.balance === 'number' ? mainAccount.balance : 0);
+
+  const txsUpToCycle = transactions.filter(t => {
+    if (!t || !mainAccount || t.accountId !== mainAccount.id || t.status !== 'paid') return false;
+    if (t.cycleMonth) return t.cycleMonth <= currentMonth;
+    return (t.date || '') <= (cutoffDate || `${currentMonth}-31`);
+  });
+
+  const txDelta = txsUpToCycle.reduce((sum, t) => {
+    const val = Number(t.amount) || 0;
+    return sum + (t.type === 'income' ? val : -val);
+  }, 0);
+
+  const mainAccountBalanceAtCycleEnd = Math.round((baseBal + txDelta) * 100) / 100;
 
   // 3. Ordenar categorias por maior despesa
   const sortedCategories = Object.entries(categoryExpenses)
@@ -651,6 +679,19 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
                       </span>
                     </div>
                   )}
+
+                  {/* Saldo Final da Conta Principal ao Fim do Ciclo */}
+                  <div className="mt-1.5 pt-1.5 border-t border-zinc-200/80 flex items-center justify-between text-[10.5px] text-zinc-800">
+                    <div className="flex items-center gap-1.5 truncate">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+                      <span>
+                        Saldo final na conta principal <strong className="text-zinc-950">({mainAccount?.name || 'PicPay'})</strong> ao fim do ciclo: <strong className="text-zinc-950 font-black">{maskVal(mainAccountBalanceAtCycleEnd)}</strong>
+                      </span>
+                    </div>
+                    <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200 shrink-0 ml-2">
+                      Saldo Final
+                    </span>
+                  </div>
                 </div>
 
                 {/* Score */}
@@ -710,16 +751,17 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
                   </div>
                 </div>
 
-                <div className="bg-zinc-50 border border-zinc-200 rounded-lg p-2.5">
-                  <div className="flex items-center justify-between text-zinc-500 mb-0.5">
-                    <span className="text-[9px] font-bold uppercase tracking-wider">Em Contas</span>
-                    <Wallet className="w-3.5 h-3.5 text-zinc-700" />
+                <div className="bg-lime-50/70 border border-lime-200/90 rounded-lg p-2.5">
+                  <div className="flex items-center justify-between text-zinc-600 mb-0.5">
+                    <span className="text-[9px] font-black uppercase tracking-wider text-zinc-900">Saldo Conta Principal</span>
+                    <Landmark className="w-3.5 h-3.5 text-lime-700" />
                   </div>
-                  <div className="text-sm font-black text-zinc-900">
-                    {maskVal(totalAccountBalance)}
+                  <div className="text-sm font-black text-zinc-950">
+                    {maskVal(mainAccountBalanceAtCycleEnd)}
                   </div>
-                  <div className="text-[8.5px] text-zinc-500 mt-0.5">
-                    {accounts.length} contas bancárias
+                  <div className="text-[8.5px] text-zinc-600 mt-0.5 flex justify-between">
+                    <span className="truncate max-w-[95px] font-semibold">{mainAccount?.name || 'PicPay'} (fim ciclo)</span>
+                    <span title="Total patrimonial de todas as contas">Total: {maskVal(totalAccountBalance)}</span>
                   </div>
                 </div>
               </div>
@@ -1128,12 +1170,21 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
                         </thead>
                         <tbody className="divide-y divide-zinc-100">
                           {accounts.map(acc => {
-                            const balance = Number(acc.balance || 0);
+                            const isMain = acc.id === mainAccount?.id;
+                            const balance = isMain ? mainAccountBalanceAtCycleEnd : Number(acc.balance || 0);
                             const share = totalAccountBalance > 0 ? (balance / totalAccountBalance) * 100 : 0;
                             return (
-                              <tr key={acc.id} className="hover:bg-zinc-50/50">
-                                <td className="py-1.5 px-2 font-semibold text-zinc-800 text-[10.5px]">
-                                  {acc.name} <span className="text-zinc-500 font-normal text-[9.5px]">({acc.institution})</span>
+                              <tr key={acc.id} className={isMain ? 'bg-lime-50/70 font-semibold' : 'hover:bg-zinc-50/50'}>
+                                <td className="py-1.5 px-2 font-semibold text-zinc-900 text-[10.5px]">
+                                  <div className="flex items-center gap-1.5">
+                                    <span>{acc.name}</span>
+                                    <span className="text-zinc-500 font-normal text-[9.5px]">({acc.institution})</span>
+                                    {isMain && (
+                                      <span className="px-1.5 py-0.2 rounded text-[8px] font-extrabold uppercase bg-lime-200/80 text-lime-950 border border-lime-300">
+                                        Principal
+                                      </span>
+                                    )}
+                                  </div>
                                 </td>
                                 <td className="py-1.5 px-2 text-zinc-600 capitalize text-[10px]">
                                   {acc.type === 'checking' ? 'Corrente' : acc.type === 'savings' ? 'Poupança' : acc.type === 'investment' ? 'Investimento' : 'Carteira'}
@@ -1150,6 +1201,21 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
                         </tbody>
                       </table>
                     </div>
+
+                    {/* Destaque do Saldo Final da Conta Principal ao fim do ciclo */}
+                    {mainAccount && (
+                      <div className="mt-2.5 p-2 bg-lime-50/80 border border-lime-200/90 rounded-lg flex items-center justify-between text-[10px] text-zinc-800">
+                        <div className="flex items-center gap-1.5">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-lime-700 shrink-0" />
+                          <span>
+                            <strong>Saldo Final da Conta Principal ({mainAccount.name}):</strong> encerramento deste ciclo salarial com <strong>{maskVal(mainAccountBalanceAtCycleEnd)}</strong> disponível para o início do próximo ciclo.
+                          </span>
+                        </div>
+                        <span className="font-black text-zinc-950 text-xs ml-2 shrink-0">
+                          {maskVal(mainAccountBalanceAtCycleEnd)}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 )}
 
