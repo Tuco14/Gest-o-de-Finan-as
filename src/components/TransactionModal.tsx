@@ -85,11 +85,29 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         accounts[0];
       setAccountId(preferredAccount?.id || '');
       
-      // Data padrão: hoje em tempo local. Se hoje estiver em transição de mês (ex: primeiros dias do mês seguinte),
-      // mantém a data real de hoje e vincula por padrão ao ciclo do mês ativo (salário anterior)
+      // Data padrão: se o usuário está visualizando um mês diferente do mês do calendário real,
+      // a data padrão DEVE pertencer ao mês ativo (currentMonth) para que a receita/despesa não vá para outro mês!
       const now = new Date();
-      const localToday = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-      setDate(localToday);
+      const currentYearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+      
+      let defaultDate: string;
+      if (currentMonth === currentYearMonth) {
+        defaultDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+      } else {
+        // Ex: visualizando Outubro/2026 enquanto hoje é Novembro/2026:
+        if (initialType === 'income') {
+          // Para receita: 5º dia útil / pagamento de salário em Outubro
+          defaultDate = `${currentMonth}-05`;
+        } else {
+          // Para despesa: dia equivalente ou dia 10 de Outubro
+          const [y, m] = currentMonth.split('-');
+          const daysInMonth = new Date(parseInt(y, 10), parseInt(m, 10), 0).getDate();
+          const dayNum = Math.min(now.getDate(), daysInMonth);
+          defaultDate = `${currentMonth}-${String(dayNum).padStart(2, '0')}`;
+        }
+      }
+
+      setDate(defaultDate);
       setCycleMonth(currentMonth);
       setPaymentMethod('Pix');
       setStatus('paid');
@@ -209,6 +227,11 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                 setType('income');
                 const cat = categories.find(c => c.type === 'income');
                 if (cat) setCategoryId(cat.id);
+                // Se a data atual não pertencer ao mês ativo, ajusta para o 5º dia útil do mês ativo
+                if (!date || !date.startsWith(currentMonth)) {
+                  setDate(`${currentMonth}-05`);
+                }
+                setCycleMonth(currentMonth);
               }}
               className={`flex items-center justify-center gap-2 py-2.5 rounded-xl font-bold text-xs transition-all cursor-pointer ${
                 type === 'income'
@@ -306,21 +329,31 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                 id="transaction-date-input"
                 type="date"
                 value={date}
-                onChange={e => setDate(e.target.value)}
+                onChange={e => {
+                  const newDate = e.target.value;
+                  setDate(newDate);
+                  if (errors.date) setErrors(prev => ({ ...prev, date: '' }));
+                  if (newDate) {
+                    const dateMonth = newDate.substring(0, 7);
+                    if (dateMonth === currentMonth) {
+                      setCycleMonth(currentMonth);
+                    }
+                  }
+                }}
                 className="w-full px-3 py-2.5 bg-zinc-800 border border-zinc-700 rounded-xl text-xs font-medium text-white focus:outline-hidden focus:ring-2 focus:ring-lime-400/20 focus:border-lime-400 cursor-pointer"
               />
             </div>
           </div>
 
-          {/* Ciclo Financeiro / Salário de Referência */}
+          {/* Ciclo Financeiro / Mês de Referência */}
           <div className="bg-zinc-850/80 border border-zinc-750/70 rounded-2xl p-3 text-xs">
             <div className="flex items-center justify-between mb-1.5">
               <span className="font-semibold text-zinc-300 flex items-center gap-1.5">
-                <Calendar className="w-3.5 h-3.5 text-lime-400" />
-                <span>Ciclo Salarial / Mês de Referência</span>
+                <Calendar className={`w-3.5 h-3.5 ${type === 'income' ? 'text-emerald-400' : 'text-lime-400'}`} />
+                <span>{type === 'income' ? 'Mês de Referência da Receita' : 'Ciclo Salarial / Mês de Referência'}</span>
               </span>
               <span className="text-[10px] text-zinc-400">
-                Qual salário paga esse gasto?
+                {type === 'income' ? 'Contabilizar em qual mês?' : 'Qual salário paga esse gasto?'}
               </span>
             </div>
             <select
@@ -330,18 +363,24 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
               className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-xl text-xs font-semibold text-white focus:outline-hidden focus:ring-2 focus:ring-lime-400/20 focus:border-lime-400 cursor-pointer"
             >
               <option value={currentMonth}>
-                Ciclo de {formatMonthYear(currentMonth)} (Salário de {formatMonthYear(currentMonth)})
+                {type === 'income'
+                  ? `Receita de ${formatMonthYear(currentMonth)} (Mês Ativo)`
+                  : `Ciclo de ${formatMonthYear(currentMonth)} (Salário de ${formatMonthYear(currentMonth)})`}
               </option>
               {date && date.substring(0, 7) !== currentMonth && (
                 <option value={date.substring(0, 7)}>
-                  Ciclo de {formatMonthYear(date.substring(0, 7))} (Salário de {formatMonthYear(date.substring(0, 7))})
+                  {type === 'income'
+                    ? `Receita de ${formatMonthYear(date.substring(0, 7))}`
+                    : `Ciclo de ${formatMonthYear(date.substring(0, 7))} (Salário de ${formatMonthYear(date.substring(0, 7))})`}
                 </option>
               )}
             </select>
             <p className="text-[10px] text-zinc-400 mt-1.5 leading-relaxed">
-              💡 {cycleMonth === currentMonth
-                ? `Computado no mês de ${formatMonthYear(currentMonth)} — ideal para compras feitas antes do 5º dia útil com o salário anterior.`
-                : `Computado no novo ciclo de ${formatMonthYear(cycleMonth)}.`}
+              {type === 'income'
+                ? `💡 Esta receita será contabilizada nos totais e no fluxo de caixa de ${formatMonthYear(cycleMonth)}.`
+                : cycleMonth === currentMonth
+                ? `💡 Computado no ciclo de ${formatMonthYear(currentMonth)} — ideal para compras feitas até o 5º dia útil pagas com o salário anterior.`
+                : `💡 Computado no novo ciclo de ${formatMonthYear(cycleMonth)}.`}
             </p>
           </div>
 

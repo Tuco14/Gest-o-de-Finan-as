@@ -79,13 +79,19 @@ if (typeof window !== 'undefined') {
 }
 
 export default function App() {
-  // LocalStorage initialization - com rigorosa deduplicação por ID
+  // LocalStorage initialization - com rigorosa deduplicação por ID e ciclo válido
   const [transactions, setTransactions] = useState<Transaction[]>(() => {
     const saved = localStorage.getItem('fincontrol_transactions');
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return deduplicateById<Transaction>(parsed);
+        if (Array.isArray(parsed)) {
+          const sanitized = parsed.map(t => ({
+            ...t,
+            cycleMonth: t.cycleMonth || (t.date ? t.date.substring(0, 7) : '2026-10'),
+          }));
+          return deduplicateById<Transaction>(sanitized);
+        }
       } catch (e) { console.error(e); }
     }
     return INITIAL_TRANSACTIONS;
@@ -241,6 +247,7 @@ export default function App() {
             paymentMethod: data.paymentMethod,
             notes: data.notes || '',
             createdAt: data.createdAt || new Date().toISOString(),
+            cycleMonth: data.cycleMonth || (data.date ? data.date.substring(0, 7) : currentMonth),
           });
         });
 
@@ -248,6 +255,7 @@ export default function App() {
         const uniqueTxs = deduplicateById(cloudTxs);
         uniqueTxs.sort((a, b) => b.date.localeCompare(a.date));
         setTransactions(uniqueTxs);
+        localStorage.setItem('fincontrol_transactions', JSON.stringify(uniqueTxs));
         setIsSyncing(false);
       },
       error => {
@@ -551,13 +559,19 @@ export default function App() {
   };
 
   const handleSaveTransaction = async (tx: Transaction) => {
-    const nextTxs = [tx, ...transactions.filter(t => t.id !== tx.id)];
+    const targetCycle = tx.cycleMonth || (tx.date ? tx.date.substring(0, 7) : currentMonth);
+    const finalTx: Transaction = {
+      ...tx,
+      cycleMonth: targetCycle,
+    };
+    const nextTxs = [finalTx, ...transactions.filter(t => t.id !== finalTx.id)];
     setTransactions(nextTxs);
+    localStorage.setItem('fincontrol_transactions', JSON.stringify(nextTxs));
 
     if (currentUser) {
       try {
-        await setDoc(doc(db, 'transactions', tx.id), {
-          ...tx,
+        await setDoc(doc(db, 'transactions', finalTx.id), {
+          ...finalTx,
           userId: currentUser.uid,
           updatedAt: new Date().toISOString(),
         });
@@ -565,8 +579,8 @@ export default function App() {
         console.error('Erro ao salvar no Firestore:', err);
       }
 
-      const affectedIds = [tx.accountId];
-      if (editingTransaction && editingTransaction.accountId && editingTransaction.accountId !== tx.accountId) {
+      const affectedIds = [finalTx.accountId];
+      if (editingTransaction && editingTransaction.accountId && editingTransaction.accountId !== finalTx.accountId) {
         affectedIds.push(editingTransaction.accountId);
       }
       await syncAccountsToFirestore(affectedIds, nextTxs);
@@ -575,7 +589,7 @@ export default function App() {
     if (editingTransaction) {
       showToast('Transação atualizada com sucesso!');
     } else {
-      showToast('Novo lançamento registrado com sucesso!');
+      showToast(`${finalTx.type === 'income' ? 'Receita' : 'Despesa'} registrada com sucesso!`);
     }
   };
 
@@ -1543,6 +1557,8 @@ export default function App() {
           <div className="animate-in fade-in duration-200">
             <TransactionList
               transactions={transactions.filter(t => isTransactionInCycle(t, currentMonth))}
+              allTransactions={transactions}
+              currentMonth={currentMonth}
               categories={categories}
               accounts={accountsWithLiveBalances}
               privacyMode={privacyMode}

@@ -6,7 +6,7 @@ import {
   TransactionType, 
   TransactionStatus 
 } from '../types';
-import { formatCurrency, formatDateBR, deduplicateById } from '../utils/formatters';
+import { formatCurrency, formatDateBR, formatMonthYear, deduplicateById } from '../utils/formatters';
 import { CategoryIcon } from './CategoryIcon';
 import { 
   Search, 
@@ -28,6 +28,8 @@ import {
 
 interface TransactionListProps {
   transactions: Transaction[];
+  allTransactions?: Transaction[];
+  currentMonth?: string;
   categories: Category[];
   accounts: Account[];
   privacyMode: boolean;
@@ -44,6 +46,8 @@ interface TransactionListProps {
 
 export const TransactionList: React.FC<TransactionListProps> = ({
   transactions,
+  allTransactions,
+  currentMonth,
   categories,
   accounts,
   privacyMode,
@@ -57,6 +61,7 @@ export const TransactionList: React.FC<TransactionListProps> = ({
   onBulkDelete,
   onBulkMarkPaid,
 }) => {
+  const [viewScope, setViewScope] = useState<'cycle' | 'all'>('cycle');
   const [searchTerm, setSearchTerm] = useState('');
   const [typeFilter, setTypeFilter] = useState<'all' | TransactionType>('all');
   const [catFilter, setCatFilter] = useState<string>(selectedCategoryFilter || 'all');
@@ -76,9 +81,16 @@ export const TransactionList: React.FC<TransactionListProps> = ({
   const categoryMap = useMemo(() => new Map(categories.map(c => [c.id, c])), [categories]);
   const accountMap = useMemo(() => new Map(accounts.map(a => [a.id, a])), [accounts]);
 
+  const effectiveTransactions = useMemo(() => {
+    if (viewScope === 'all' && allTransactions && allTransactions.length > 0) {
+      return allTransactions;
+    }
+    return transactions;
+  }, [viewScope, allTransactions, transactions]);
+
   // Filtragem e ordenação
   const filteredTransactions = useMemo(() => {
-    const uniqueTxList = deduplicateById(transactions);
+    const uniqueTxList = deduplicateById(effectiveTransactions);
 
     return uniqueTxList
       .filter(tx => {
@@ -108,7 +120,7 @@ export const TransactionList: React.FC<TransactionListProps> = ({
         if (sortBy === 'amount-asc') return a.amount - b.amount;
         return 0;
       });
-  }, [transactions, searchTerm, typeFilter, catFilter, accountFilter, statusFilter, sortBy, categoryMap]);
+  }, [effectiveTransactions, searchTerm, typeFilter, catFilter, accountFilter, statusFilter, sortBy, categoryMap]);
 
   // Totais do filtro ativo
   const filteredTotals = useMemo(() => {
@@ -186,6 +198,34 @@ export const TransactionList: React.FC<TransactionListProps> = ({
 
   return (
     <div className="transaction-list-container space-y-4">
+      {/* Indicador de Escopo do Ciclo / Todos os Lançamentos */}
+      {allTransactions && allTransactions.length > 0 && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-4 py-2.5 bg-zinc-850/90 border border-zinc-750/70 rounded-2xl text-xs">
+          <div className="flex items-center gap-2">
+            <span className={`w-2 h-2 rounded-full ${viewScope === 'cycle' ? 'bg-lime-400' : 'bg-blue-400'}`} />
+            <span className="font-semibold text-zinc-200">
+              {viewScope === 'cycle'
+                ? `Ciclo de ${formatMonthYear(currentMonth || '2026-10')}: ${transactions.length} lançamentos`
+                : `Todos os Lançamentos Registrados: ${allTransactions.length} lançamentos`}
+            </span>
+            {viewScope === 'cycle' && allTransactions.length > transactions.length && (
+              <span className="text-[11px] text-zinc-400">
+                ({allTransactions.length - transactions.length} em outros períodos)
+              </span>
+            )}
+          </div>
+          {allTransactions.length > transactions.length && (
+            <button
+              id="toggle-view-scope-btn"
+              onClick={() => setViewScope(prev => prev === 'cycle' ? 'all' : 'cycle')}
+              className="text-lime-400 hover:text-lime-300 font-semibold cursor-pointer underline underline-offset-2 self-start sm:self-auto text-xs"
+            >
+              {viewScope === 'cycle' ? `Ver todos os ${allTransactions.length} lançamentos` : `Ver apenas ciclo de ${formatMonthYear(currentMonth || '2026-10')}`}
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Barra de Filtros e Busca */}
       <div className="bg-zinc-900 rounded-2xl p-4 border border-zinc-800 shadow-md space-y-3">
         <div className="flex flex-col md:flex-row gap-3 items-center justify-between">
@@ -520,7 +560,12 @@ export const TransactionList: React.FC<TransactionListProps> = ({
 
                       {/* Data */}
                       <td className="py-3.5 px-4 whitespace-nowrap text-zinc-300 font-medium">
-                        {formatDateBR(tx.date)}
+                        <div>{formatDateBR(tx.date)}</div>
+                        {tx.cycleMonth && (tx.cycleMonth !== (currentMonth || '2026-10') || viewScope === 'all') && (
+                          <div className="text-[10px] text-lime-400 font-normal">
+                            Ciclo {formatMonthYear(tx.cycleMonth)}
+                          </div>
+                        )}
                       </td>
 
                       {/* Status Toggle */}
