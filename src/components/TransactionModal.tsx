@@ -14,7 +14,7 @@ import {
 import { Transaction, Category, Account, TransactionType, TransactionStatus, PaymentMethod } from '../types';
 import { CategoryIcon } from './CategoryIcon';
 import { CategorySelect } from './CategorySelect';
-import { generateId } from '../utils/formatters';
+import { generateId, formatMonthYear } from '../utils/formatters';
 
 interface TransactionModalProps {
   isOpen: boolean;
@@ -50,6 +50,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('Pix');
   const [status, setStatus] = useState<TransactionStatus>('paid');
   const [notes, setNotes] = useState('');
+  const [cycleMonth, setCycleMonth] = useState<string>(currentMonth);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -66,6 +67,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       setPaymentMethod(editingTransaction.paymentMethod);
       setStatus(editingTransaction.status);
       setNotes(editingTransaction.notes || '');
+      setCycleMonth(editingTransaction.cycleMonth || editingTransaction.date?.substring(0, 7) || currentMonth);
       setErrors({});
     } else {
       setType(initialType);
@@ -83,10 +85,12 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         accounts[0];
       setAccountId(preferredAccount?.id || '');
       
-      // Default date to today or within current month
+      // Data padrão: hoje em tempo local. Se hoje estiver em transição de mês (ex: primeiros dias do mês seguinte),
+      // mantém a data real de hoje e vincula por padrão ao ciclo do mês ativo (salário anterior)
       const now = new Date();
       const localToday = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-      setDate(localToday.startsWith(currentMonth) ? localToday : `${currentMonth}-01`);
+      setDate(localToday);
+      setCycleMonth(currentMonth);
       setPaymentMethod('Pix');
       setStatus('paid');
       setNotes('');
@@ -143,6 +147,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       paymentMethod,
       notes: notes.trim() || undefined,
       createdAt: editingTransaction ? editingTransaction.createdAt : new Date().toISOString(),
+      cycleMonth: cycleMonth || currentMonth,
     };
 
     onSave(transactionData);
@@ -305,6 +310,39 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                 className="w-full px-3 py-2.5 bg-zinc-800 border border-zinc-700 rounded-xl text-xs font-medium text-white focus:outline-hidden focus:ring-2 focus:ring-lime-400/20 focus:border-lime-400 cursor-pointer"
               />
             </div>
+          </div>
+
+          {/* Ciclo Financeiro / Salário de Referência */}
+          <div className="bg-zinc-850/80 border border-zinc-750/70 rounded-2xl p-3 text-xs">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="font-semibold text-zinc-300 flex items-center gap-1.5">
+                <Calendar className="w-3.5 h-3.5 text-lime-400" />
+                <span>Ciclo Salarial / Mês de Referência</span>
+              </span>
+              <span className="text-[10px] text-zinc-400">
+                Qual salário paga esse gasto?
+              </span>
+            </div>
+            <select
+              id="transaction-cycle-month-select"
+              value={cycleMonth}
+              onChange={e => setCycleMonth(e.target.value)}
+              className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-xl text-xs font-semibold text-white focus:outline-hidden focus:ring-2 focus:ring-lime-400/20 focus:border-lime-400 cursor-pointer"
+            >
+              <option value={currentMonth}>
+                Ciclo de {formatMonthYear(currentMonth)} (Salário de {formatMonthYear(currentMonth)})
+              </option>
+              {date && date.substring(0, 7) !== currentMonth && (
+                <option value={date.substring(0, 7)}>
+                  Ciclo de {formatMonthYear(date.substring(0, 7))} (Salário de {formatMonthYear(date.substring(0, 7))})
+                </option>
+              )}
+            </select>
+            <p className="text-[10px] text-zinc-400 mt-1.5 leading-relaxed">
+              💡 {cycleMonth === currentMonth
+                ? `Computado no mês de ${formatMonthYear(currentMonth)} — ideal para compras feitas antes do 5º dia útil com o salário anterior.`
+                : `Computado no novo ciclo de ${formatMonthYear(cycleMonth)}.`}
+            </p>
           </div>
 
           {/* Conta e Método de Pagamento */}

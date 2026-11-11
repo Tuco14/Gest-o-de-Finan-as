@@ -22,10 +22,15 @@ import {
   Award,
   Target,
   FileCheck2,
-  Receipt
+  Receipt,
+  CalendarCheck,
+  CheckCircle2,
+  ArrowRight,
+  RotateCcw,
+  Info
 } from 'lucide-react';
 import jsPDF from 'jspdf';
-import html2canvas from 'html2canvas';
+import html2canvas from 'html2canvas-pro';
 
 interface MonthlyReportModalProps {
   isOpen: boolean;
@@ -38,6 +43,9 @@ interface MonthlyReportModalProps {
   bills?: PayableBill[];
   userEmail?: string | null;
   onToast: (msg: string) => void;
+  isMonthFinalized?: boolean;
+  onFinalizeMonth?: (monthToFinalize: string, cutoffDate: string, advanceToNextMonth?: boolean) => void;
+  onReopenMonth?: (monthToReopen: string) => void;
 }
 
 export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
@@ -51,20 +59,55 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
   bills = [],
   userEmail,
   onToast,
+  isMonthFinalized = false,
+  onFinalizeMonth,
+  onReopenMonth,
 }) => {
   const page1Ref = useRef<HTMLDivElement>(null);
   const page2Ref = useRef<HTMLDivElement>(null);
   
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isFinalizing, setIsFinalizing] = useState(false);
   const [reportFormat, setReportFormat] = useState<'2pages' | '1page'>('2pages');
   const [includeAccounts, setIncludeAccounts] = useState(true);
   const [includeTopExpenses, setIncludeTopExpenses] = useState(true);
   const [hideSensitiveValues, setHideSensitiveValues] = useState(false);
 
+  const [yearStr, monthStr] = (currentMonth || '').split('-');
+  const year = parseInt(yearStr || '2026', 10);
+  const month = parseInt(monthStr || '1', 10);
+  const nextMonth = month === 12 
+    ? `${year + 1}-01` 
+    : `${year}-${String(month + 1).padStart(2, '0')}`;
+
+  const defaultCutoff = () => {
+    const now = new Date();
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    if (todayStr.startsWith(nextMonth)) {
+      return todayStr;
+    }
+    return `${nextMonth}-06`;
+  };
+
+  const [cutoffDate, setCutoffDate] = useState<string>(defaultCutoff);
+
   if (!isOpen) return null;
 
-  // 1. Filtragem e saneamento dos dados do mês
-  const monthTransactions = transactions.filter(t => t.date && t.date.startsWith(currentMonth));
+  // 1. Filtragem e saneamento dos dados do ciclo salarial do mês
+  // Como o usuário recebe após o 5º dia útil, despesas realizadas no início do próximo mês
+  // até a data do novo salário continuam pertencendo ao ciclo deste mês.
+  const cycleTransactions = transactions.filter(t => {
+    if (!t || !t.date) return false;
+    if (t.cycleMonth) return t.cycleMonth === currentMonth;
+    if (t.date.startsWith(currentMonth)) return true;
+    if (cutoffDate && t.date > `${currentMonth}-31` && t.date <= cutoffDate) {
+      return true;
+    }
+    return false;
+  });
+
+  const extendedExpenses = cycleTransactions.filter(t => t.type === 'expense' && t.date > `${currentMonth}-31`);
+  const extendedTotal = extendedExpenses.reduce((sum, t) => sum + Number(t.amount || 0), 0);
   
   // Mapeamento inteligente de categoria (busca por ID ou por Nome)
   const getCategoryInfo = (catIdentifier: string) => {
@@ -90,15 +133,15 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
   const categoryExpenses: Record<string, { name: string; color: string; amount: number }> = {};
   const paymentMethodExpenses: Record<string, number> = {};
 
-  // Divisão por semanas do mês
+  // Divisão por semanas do ciclo
   const weeklyExpenses = [
     { label: 'Semana 1', days: '01 a 07', amount: 0, count: 0 },
     { label: 'Semana 2', days: '08 a 14', amount: 0, count: 0 },
     { label: 'Semana 3', days: '15 a 21', amount: 0, count: 0 },
-    { label: 'Semana 4', days: '22 a 31', amount: 0, count: 0 },
+    { label: 'Semana 4 / Corte', days: '22 até o salário', amount: 0, count: 0 },
   ];
 
-  monthTransactions.forEach(t => {
+  cycleTransactions.forEach(t => {
     const amount = Number(t.amount || 0);
     
     if (t.type === 'income') {
@@ -124,7 +167,11 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
       // Semana da despesa
       const cleanDate = (t.date || '').split('T')[0];
       const dayNum = parseInt(cleanDate.split('-')[2] || '1', 10);
-      if (dayNum <= 7) {
+      const isNextMonth = cleanDate > `${currentMonth}-31`;
+      if (isNextMonth) {
+        weeklyExpenses[3].amount += amount;
+        weeklyExpenses[3].count++;
+      } else if (dayNum <= 7) {
         weeklyExpenses[0].amount += amount;
         weeklyExpenses[0].count++;
       } else if (dayNum <= 14) {
@@ -160,7 +207,7 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
     .sort((a, b) => b.amount - a.amount);
 
   // 4. TOP 6 MAIORES DESPESAS INDIVIDUAIS (100% blindado e ordenado numericamente)
-  const topExpenses = [...monthTransactions]
+  const topExpenses = [...cycleTransactions]
     .filter(t => t.type === 'expense')
     .map(t => ({
       ...t,
@@ -282,6 +329,25 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
     }
   };
 
+  const handleFinalizeAndAdvance = async () => {
+    setIsFinalizing(true);
+    try {
+      // 1. Gera e baixa o PDF oficial do fechamento
+      await handleDownloadPDF();
+
+      // 2. Chama a ação de fechamento de ciclo
+      if (onFinalizeMonth) {
+        onFinalizeMonth(currentMonth, cutoffDate, true);
+      }
+      onClose();
+    } catch (err) {
+      console.error('Erro ao finalizar mês:', err);
+      onToast('Erro ao finalizar o mês. Tente novamente.');
+    } finally {
+      setIsFinalizing(false);
+    }
+  };
+
   const handlePrint = () => {
     window.print();
   };
@@ -304,17 +370,23 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
         <div className="flex items-center justify-between px-6 py-3.5 border-b border-zinc-800 bg-zinc-950/80 shrink-0">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-xl bg-lime-400/20 text-lime-400 flex items-center justify-center">
-              <FileText className="w-5 h-5" />
+              <CalendarCheck className="w-5 h-5" />
             </div>
             <div>
               <h2 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
-                <span>Exportar Relatório em PDF</span>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-lime-400/20 text-lime-400 font-bold border border-lime-400/30">
-                  Sem Cortes
-                </span>
+                <span>Finalizar Mês & Relatório de Fechamento</span>
+                {isMonthFinalized ? (
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/40">
+                    Mês Finalizado
+                  </span>
+                ) : (
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-lime-400/20 text-lime-400 font-bold border border-lime-400/30">
+                    Ciclo em Aberto
+                  </span>
+                )}
               </h2>
               <p className="text-[11px] text-zinc-400">
-                Resumo executivo diagramado em páginas A4 perfeitas de {formatMonthYear(currentMonth)}
+                Fechamento do ciclo salarial de {formatMonthYear(currentMonth)} • Gastos até o novo salário ({formatDateBR(cutoffDate)})
               </p>
             </div>
           </div>
@@ -329,24 +401,65 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
               <span>Imprimir</span>
             </button>
 
-            <button
-              id="download-pdf-btn"
-              onClick={handleDownloadPDF}
-              disabled={isGenerating}
-              className="flex items-center gap-1.5 px-4 py-1.5 bg-lime-400 hover:bg-lime-300 text-zinc-950 text-xs font-bold rounded-xl transition-all cursor-pointer shadow-md shadow-lime-400/20 disabled:opacity-50"
-            >
-              {isGenerating ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Gerando PDF...</span>
-                </>
-              ) : (
-                <>
+            {isMonthFinalized ? (
+              <>
+                {onReopenMonth && (
+                  <button
+                    onClick={() => {
+                      onReopenMonth(currentMonth);
+                      onClose();
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-zinc-700 text-zinc-300 hover:text-white hover:bg-zinc-800 text-xs font-semibold transition-colors cursor-pointer"
+                    title="Reabrir este mês para lançar novas despesas no ciclo"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Reabrir Mês</span>
+                  </button>
+                )}
+                <button
+                  id="download-pdf-btn"
+                  onClick={handleDownloadPDF}
+                  disabled={isGenerating}
+                  className="flex items-center gap-1.5 px-4 py-1.5 bg-lime-400 hover:bg-lime-300 text-zinc-950 text-xs font-bold rounded-xl transition-all cursor-pointer shadow-md shadow-lime-400/20 disabled:opacity-50"
+                >
                   <Download className="w-4 h-4 stroke-[2.5]" />
                   <span>Baixar PDF</span>
-                </>
-              )}
-            </button>
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  id="download-pdf-only-btn"
+                  onClick={handleDownloadPDF}
+                  disabled={isGenerating || isFinalizing}
+                  className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-zinc-750 text-zinc-300 hover:text-white hover:bg-zinc-800 text-xs font-semibold transition-colors cursor-pointer"
+                  title="Apenas exportar o PDF sem encerrar o ciclo"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Apenas Baixar PDF</span>
+                </button>
+
+                <button
+                  id="finalize-and-advance-btn"
+                  onClick={handleFinalizeAndAdvance}
+                  disabled={isGenerating || isFinalizing}
+                  className="flex items-center gap-1.5 px-4 py-1.5 bg-lime-400 hover:bg-lime-300 text-zinc-950 text-xs font-bold rounded-xl transition-all cursor-pointer shadow-md shadow-lime-400/20 disabled:opacity-50 active:scale-98"
+                  title="Finalizar este mês, registrar o fechamento salarial e avançar para o próximo mês"
+                >
+                  {isFinalizing || isGenerating ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Finalizando...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="w-4 h-4 stroke-[2.5]" />
+                      <span>Finalizar Mês & Avançar</span>
+                    </>
+                  )}
+                </button>
+              </>
+            )}
 
             <button
               onClick={onClose}
@@ -354,6 +467,39 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
             >
               <X className="w-5 h-5" />
             </button>
+          </div>
+        </div>
+
+        {/* Barra de Ciclo Salarial & Data de Recebimento do Próximo Salário */}
+        <div className="px-6 py-2.5 bg-zinc-950/70 border-b border-zinc-800/80 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 text-xs text-zinc-300 shrink-0">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <span className="font-semibold text-white flex items-center gap-1.5">
+              <CalendarCheck className="w-4 h-4 text-lime-400" />
+              <span>Data de Corte (Novo Salário):</span>
+            </span>
+            <input
+              type="date"
+              value={cutoffDate}
+              onChange={e => setCutoffDate(e.target.value)}
+              className="px-2.5 py-1 bg-zinc-900 border border-zinc-700 rounded-lg text-xs font-bold text-lime-400 focus:outline-hidden focus:border-lime-400 cursor-pointer"
+              title="Defina o dia em que você recebe o salário do mês seguinte para estender as compras anteriores"
+            />
+            <span className="text-[11px] text-zinc-400 hidden lg:inline">
+              (5º dia útil / compras até esta data entram neste mês)
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {extendedExpenses.length > 0 ? (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-lime-400/15 text-lime-300 border border-lime-400/30 text-[11px] font-semibold">
+                <Sparkles className="w-3 h-3 text-lime-400" />
+                <span>{extendedExpenses.length} compras no início do mês seguinte incluídas ({maskVal(extendedTotal)})</span>
+              </span>
+            ) : (
+              <span className="text-[11px] text-zinc-400">
+                {cycleTransactions.length} lançamentos vinculados ao ciclo
+              </span>
+            )}
           </div>
         </div>
 
@@ -438,12 +584,21 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
                       </span>
                     </div>
                   </div>
-                  <h2 className="text-base font-black text-zinc-900 mt-1.5 tracking-tight">
-                    Relatório Executivo Mensal
+                  <h2 className="text-base font-black text-zinc-900 mt-1.5 tracking-tight flex items-center gap-2">
+                    <span>Relatório de Fechamento Salarial</span>
+                    <span className={`text-[9px] px-2 py-0.5 rounded-md font-bold uppercase ${isMonthFinalized ? 'bg-emerald-100 text-emerald-900 border border-emerald-300' : 'bg-lime-100 text-lime-900 border border-lime-300'}`}>
+                      {isMonthFinalized ? 'Ciclo Finalizado' : 'Fechamento Salarial'}
+                    </span>
                   </h2>
-                  <div className="flex items-center gap-2 text-[11px] text-zinc-600">
-                    <Calendar className="w-3.5 h-3.5 text-zinc-500" />
-                    <span>Mês de Referência: <strong className="text-zinc-900 capitalize">{formatMonthYear(currentMonth)}</strong></span>
+                  <div className="flex flex-wrap items-center gap-x-2 text-[11px] text-zinc-600">
+                    <div className="flex items-center gap-1">
+                      <Calendar className="w-3.5 h-3.5 text-zinc-500" />
+                      <span>Mês: <strong className="text-zinc-900 capitalize">{formatMonthYear(currentMonth)}</strong></span>
+                    </div>
+                    <span>•</span>
+                    <div>
+                      <span>Ciclo: <strong>01/{monthStr}/{yearStr} até {formatDateBR(cutoffDate)}</strong></span>
+                    </div>
                   </div>
                 </div>
 
@@ -584,7 +739,7 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
                       <span>Balanço de Fluxo no Mês</span>
                     </h3>
                     <span className="text-[9px] font-bold text-zinc-500">
-                      {monthTransactions.length} lançamentos
+                      {cycleTransactions.length} lançamentos
                     </span>
                   </div>
 

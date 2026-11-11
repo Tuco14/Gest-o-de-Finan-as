@@ -48,3 +48,19 @@ export function deduplicateById<T extends Record<string, any>>(items: T[]): T[] 
   }
   return result;
 }
+
+/**
+ * Verifica se uma transação pertence ao ciclo salarial/financeiro do mês especificado.
+ * Se a transação possui cycleMonth explícito (ex: compra no início do mês seguinte paga com o salário anterior),
+ * prevalece o cycleMonth. Caso contrário, considera o mês da data.
+ */
+export function isTransactionInCycle(
+  transaction: { date?: string; cycleMonth?: string } | null | undefined,
+  targetMonth: string
+): boolean {
+  if (!transaction) return false;
+  if (transaction.cycleMonth) {
+    return transaction.cycleMonth === targetMonth;
+  }
+  return !!transaction.date && transaction.date.startsWith(targetMonth);
+}

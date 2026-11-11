@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { Transaction, Category } from '../types';
-import { formatCurrency, formatMonthYear, deduplicateById } from '../utils/formatters';
+import { formatCurrency, formatMonthYear, deduplicateById, isTransactionInCycle } from '../utils/formatters';
 import { 
   BarChart3, 
   ShieldCheck, 
@@ -11,7 +11,8 @@ import {
   ArrowUpRight, 
   CheckCircle2,
   PieChart,
-  FileText
+  FileText,
+  CalendarCheck
 } from 'lucide-react';
 
 interface ReportsViewProps {
@@ -38,7 +39,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     const catExpenseMap: Record<string, number> = {};
 
     transactions.forEach(t => {
-      if (t.date.startsWith(currentMonth)) {
+      if (isTransactionInCycle(t, currentMonth)) {
         if (t.type === 'income') {
           income += t.amount;
         } else {
@@ -85,7 +86,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
     // Top 5 maiores despesas individuais
     const topExpenses = transactions
-      .filter(t => t.type === 'expense' && t.date.startsWith(currentMonth))
+      .filter(t => t.type === 'expense' && isTransactionInCycle(t, currentMonth))
       .sort((a, b) => b.amount - a.amount)
       .slice(0, 5);
 
@@ -127,10 +128,10 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
               <button
                 id="report-banner-pdf-btn"
                 onClick={onOpenMonthlyReport}
-                className="mt-3.5 inline-flex items-center gap-2 px-3.5 py-1.5 bg-lime-400 hover:bg-lime-300 text-zinc-950 text-xs font-bold rounded-xl transition-all shadow-md shadow-lime-400/20 cursor-pointer"
+                className="mt-3.5 inline-flex items-center gap-2 px-4 py-2 bg-lime-400 hover:bg-lime-300 text-zinc-950 text-xs font-bold rounded-xl transition-all shadow-md shadow-lime-400/20 cursor-pointer"
               >
-                <FileText className="w-4 h-4 stroke-[2.5]" />
-                <span>Exportar Resumo Mensal em PDF</span>
+                <CalendarCheck className="w-4 h-4 stroke-[2.5]" />
+                <span>Finalizar Mês & Relatório PDF</span>
               </button>
             )}
           </div>

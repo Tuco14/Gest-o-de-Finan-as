@@ -35,6 +35,18 @@ export interface Transaction {
   paymentMethod: PaymentMethod;
   notes?: string;
   createdAt: string;
+  cycleMonth?: string; // YYYY-MM do ciclo salarial ao qual o lançamento pertence (ex: compras feitas até o 5º dia útil do mês seguinte com salário anterior)
+}
+
+export interface MonthCycleClosure {
+  month: string; // YYYY-MM (ex: '2026-10')
+  closedAt: string; // ISO date
+  cutoffDate: string; // YYYY-MM-DD até onde o ciclo se estendeu (ex: '2026-11-06')
+  nextMonth: string; // YYYY-MM (ex: '2026-11')
+  totalIncome: number;
+  totalExpenses: number;
+  netSurplus: number;
+  notes?: string;
 }
 
 export interface FinancialGoal {

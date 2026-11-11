@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Category, Transaction, FinancialGoal, TransactionType } from '../types';
-import { formatCurrency, formatDateBR, generateId, deduplicateById } from '../utils/formatters';
+import { formatCurrency, formatDateBR, generateId, deduplicateById, isTransactionInCycle } from '../utils/formatters';
 import { CategoryIcon } from './CategoryIcon';
 import { 
   Target, 
@@ -84,7 +84,7 @@ export const BudgetsView: React.FC<BudgetsViewProps> = ({
   const categorySpentMap = useMemo(() => {
     const map: Record<string, number> = {};
     deduplicateById(transactions).forEach(t => {
-      if (t.type === 'expense' && t.date.startsWith(currentMonth)) {
+      if (t.type === 'expense' && isTransactionInCycle(t, currentMonth)) {
         map[t.category] = (map[t.category] || 0) + t.amount;
       }
     });

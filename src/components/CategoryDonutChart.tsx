@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Category, Transaction } from '../types';
-import { formatCurrency, deduplicateById } from '../utils/formatters';
+import { formatCurrency, deduplicateById, isTransactionInCycle } from '../utils/formatters';
 import { CategoryIcon } from './CategoryIcon';
 import { PieChart, ArrowUpRight } from 'lucide-react';
 
@@ -24,7 +24,7 @@ export const CategoryDonutChart: React.FC<CategoryDonutChartProps> = ({
   // Calcular totais por categoria de despesa no mês selecionado
   const { catData, totalExpense } = useMemo(() => {
     const expenses = deduplicateById(transactions).filter(
-      t => t.type === 'expense' && t.date.startsWith(currentMonth)
+      t => t.type === 'expense' && isTransactionInCycle(t, currentMonth)
     );
 
     const map: Record<string, number> = {};

@@ -12,6 +12,7 @@ import {
   Target, 
   BarChart3,
   Calendar,
+  CalendarCheck,
   Cloud,
   CheckCircle2,
   User as UserIcon,
@@ -38,6 +39,7 @@ interface HeaderProps {
   localUser?: { name: string; email: string } | null;
   onOpenAuth: () => void;
   isSyncing?: boolean;
+  isMonthFinalized?: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -55,6 +57,7 @@ export const Header: React.FC<HeaderProps> = ({
   localUser,
   onOpenAuth,
   isSyncing,
+  isMonthFinalized = false,
 }) => {
   // Funções para navegar entre meses
   const handlePrevMonth = () => {
@@ -193,16 +196,34 @@ export const Header: React.FC<HeaderProps> = ({
               {privacyMode ? <EyeOff className="w-5 h-5 text-lime-400" /> : <Eye className="w-5 h-5" />}
             </button>
 
-            {/* Exportar Resumo Mensal em PDF */}
+            {/* Finalizar Mês / Mês Finalizado & Relatório de Fechamento */}
             <button
-              id="export-monthly-pdf-btn"
+              id="finalize-month-btn"
               onClick={onOpenMonthlyReport}
-              className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-zinc-200 hover:text-white bg-zinc-800/90 hover:bg-zinc-750 rounded-xl border border-zinc-700 hover:border-lime-400/40 shadow-xs transition-all cursor-pointer"
-              title="Exportar Resumo Mensal formatado em PDF com gráficos e saldos"
+              className={`flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl border shadow-xs transition-all cursor-pointer ${
+                isMonthFinalized
+                  ? 'text-emerald-300 bg-emerald-950/50 hover:bg-emerald-900/60 border-emerald-500/40 shadow-emerald-500/10'
+                  : 'text-zinc-200 hover:text-white bg-zinc-800/90 hover:bg-zinc-750 border-zinc-700 hover:border-lime-400/50 hover:shadow-lime-400/10'
+              }`}
+              title={
+                isMonthFinalized
+                  ? 'Mês finalizado! Clique para ver o resumo de fechamento e emitir o PDF.'
+                  : 'Finalizar ciclo salarial do mês, definir data de corte do salário e gerar relatório.'
+              }
             >
-              <FileText className="w-4 h-4 text-lime-400 shrink-0" />
-              <span className="hidden sm:inline">Relatório PDF</span>
-              <span className="sm:hidden">PDF</span>
+              {isMonthFinalized ? (
+                <>
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span className="hidden sm:inline">Mês Finalizado</span>
+                  <span className="sm:hidden">Finalizado</span>
+                </>
+              ) : (
+                <>
+                  <CalendarCheck className="w-4 h-4 text-lime-400 shrink-0" />
+                  <span className="hidden sm:inline">Finalizar Mês</span>
+                  <span className="sm:hidden">Finalizar</span>
+                </>
+              )}
             </button>
 
             {/* Export CSV */}

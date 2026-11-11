@@ -26,7 +26,7 @@ import { UpcomingBills } from './components/UpcomingBills';
 import { BillsView } from './components/BillsView';
 import { ResetConfirmModal } from './components/ResetConfirmModal';
 import { OfflineIndicator } from './components/OfflineIndicator';
-import { formatCurrency, deduplicateById, generateId } from './utils/formatters';
+import { formatCurrency, deduplicateById, generateId, formatMonthYear, isTransactionInCycle } from './utils/formatters';
 import { 
   CheckCircle, 
   RotateCcw, 
@@ -128,12 +128,21 @@ export default function App() {
     return [];
   });
 
-  // Estado do mês ativo (YYYY-MM atual do sistema)
   const [currentMonth, setCurrentMonth] = useState<string>(() => {
     const now = new Date();
     const year = now.getFullYear();
     const month = String(now.getMonth() + 1).padStart(2, '0');
     return `${year}-${month}`;
+  });
+
+  // Lista de meses que tiveram seu ciclo salarial finalizado
+  const [finalizedMonths, setFinalizedMonths] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('fincontrol_finalized_months');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
   });
 
   const [privacyMode, setPrivacyMode] = useState<boolean>(() => {
@@ -433,7 +442,7 @@ export default function App() {
     const seenTxIds = new Set<string>();
 
     transactions.forEach(t => {
-      if (t && t.id && !seenTxIds.has(t.id) && t.date.startsWith(currentMonth)) {
+      if (t && t.id && !seenTxIds.has(t.id) && isTransactionInCycle(t, currentMonth)) {
         seenTxIds.add(t.id);
         if (t.type === 'income') {
           totalIncome += t.amount;
@@ -685,6 +694,68 @@ export default function App() {
     }
 
     showToast('Transação duplicada!');
+  };
+
+  // Fechamento de Ciclo Salarial / Finalizar Mês
+  const handleFinalizeMonth = async (
+    monthToFinalize: string,
+    cutoffDate: string,
+    advanceToNextMonth = true
+  ) => {
+    // 1. Marca lançamentos até a data de corte com o ciclo do mês que está sendo finalizado
+    const nextTxs = transactions.map(t => {
+      if (!t || !t.date) return t;
+      if (t.cycleMonth) return t;
+      if (t.date.startsWith(monthToFinalize)) {
+        return { ...t, cycleMonth: monthToFinalize };
+      }
+      if (cutoffDate && t.date > `${monthToFinalize}-31` && t.date <= cutoffDate) {
+        return { ...t, cycleMonth: monthToFinalize };
+      }
+      return t;
+    });
+
+    setTransactions(nextTxs);
+
+    // Sincroniza lançamentos atualizados no Firestore se o usuário estiver autenticado
+    if (currentUser) {
+      try {
+        const batch = writeBatch(db);
+        const changedTxs = nextTxs.filter((t, i) => t.cycleMonth !== transactions[i]?.cycleMonth);
+        changedTxs.slice(0, 400).forEach(t => {
+          batch.set(doc(db, 'transactions', t.id), {
+            ...t,
+            userId: currentUser.uid,
+          }, { merge: true });
+        });
+        await batch.commit();
+      } catch (err) {
+        console.error('Erro ao sincronizar ciclo de transações no Firestore:', err);
+      }
+    }
+
+    // 2. Registra o mês como finalizado
+    const updatedFinalized = Array.from(new Set([...finalizedMonths, monthToFinalize]));
+    setFinalizedMonths(updatedFinalized);
+    localStorage.setItem('fincontrol_finalized_months', JSON.stringify(updatedFinalized));
+
+    // 3. Se solicitado, avança para o próximo mês
+    if (advanceToNextMonth) {
+      const [yearS, monthS] = monthToFinalize.split('-');
+      const yr = parseInt(yearS, 10);
+      const mo = parseInt(monthS, 10);
+      const nextMo = mo === 12 ? `${yr + 1}-01` : `${yr}-${String(mo + 1).padStart(2, '0')}`;
+      setCurrentMonth(nextMo);
+    }
+
+    showToast(`Ciclo de ${formatMonthYear(monthToFinalize)} finalizado com sucesso!`);
+  };
+
+  const handleReopenMonth = (monthToReopen: string) => {
+    const updatedFinalized = finalizedMonths.filter(m => m !== monthToReopen);
+    setFinalizedMonths(updatedFinalized);
+    localStorage.setItem('fincontrol_finalized_months', JSON.stringify(updatedFinalized));
+    showToast(`Mês de ${formatMonthYear(monthToReopen)} reaberto.`);
   };
 
   // Handlers para Categorias e Metas
@@ -1347,6 +1418,7 @@ export default function App() {
         localUser={localUser}
         onOpenAuth={() => setIsAuthModalOpen(true)}
         isSyncing={isSyncing}
+        isMonthFinalized={finalizedMonths.includes(currentMonth)}
       />
 
       {/* Conteúdo Principal */}
@@ -1416,7 +1488,7 @@ export default function App() {
         {activeTab === 'transactions' && (
           <div className="animate-in fade-in duration-200">
             <TransactionList
-              transactions={transactions.filter(t => t.date.startsWith(currentMonth))}
+              transactions={transactions.filter(t => isTransactionInCycle(t, currentMonth))}
               categories={categories}
               accounts={accountsWithLiveBalances}
               privacyMode={privacyMode}
@@ -1497,10 +1569,10 @@ export default function App() {
             <button
               onClick={() => setIsReportModalOpen(true)}
               className="hover:text-lime-400 transition-colors flex items-center gap-1.5 cursor-pointer font-medium"
-              title="Gerar e exportar resumo mensal em PDF formatado"
+              title="Finalizar ciclo salarial do mês e emitir relatório em PDF"
             >
               <FileSpreadsheet className="w-3.5 h-3.5 text-lime-400" />
-              <span>Resumo em PDF</span>
+              <span>Finalizar Mês / PDF</span>
             </button>
             <button
               onClick={handleExportCSV}
@@ -1549,7 +1621,7 @@ export default function App() {
         onSuccessToast={showToast}
       />
 
-      {/* Modal de Exportação do Resumo Mensal em PDF */}
+      {/* Modal de Finalização de Mês e Relatório de Fechamento em PDF */}
       <MonthlyReportModal
         isOpen={isReportModalOpen}
         onClose={() => setIsReportModalOpen(false)}
@@ -1561,6 +1633,9 @@ export default function App() {
         bills={bills}
         userEmail={currentUser?.email || localUser?.email}
         onToast={showToast}
+        isMonthFinalized={finalizedMonths.includes(currentMonth)}
+        onFinalizeMonth={handleFinalizeMonth}
+        onReopenMonth={handleReopenMonth}
       />
 
       {/* Pop-up de Confirmação para Zerar Dados */}
