@@ -248,6 +248,7 @@ export default function App() {
             notes: data.notes || '',
             createdAt: data.createdAt || new Date().toISOString(),
             cycleMonth: data.cycleMonth || (data.date ? data.date.substring(0, 7) : currentMonth),
+            affectsBalance: data.affectsBalance !== undefined ? !!data.affectsBalance : (docSnap.id.startsWith('tx-bill-') ? false : true),
           });
         });
 
@@ -370,6 +371,7 @@ export default function App() {
               iconName: data.iconName || '',
               accountId: data.accountId || '',
               transactionIds: Array.isArray(data.transactionIds) ? data.transactionIds : [],
+              deductFromBalance: data.deductFromBalance === true,
             });
           });
           setBills(deduplicateById(cloudBills));
@@ -421,6 +423,8 @@ export default function App() {
 
   // Cálculo em tempo real dos saldos das contas e carteiras
   // O saldo atual de cada conta reflete o saldo base (inicial) somado às receitas pagas e subtraído das despesas pagas
+  // NOTA: Transações apenas de controle (ex: contas a pagar como faculdade já descontada em folha)
+  // possuem affectsBalance: false e NÃO debitam do saldo da conta bancária / saldo disponível.
   const accountsWithLiveBalances = useMemo(() => {
     const uniqueAccs = deduplicateById(accounts);
 
@@ -429,9 +433,15 @@ export default function App() {
         ? acc.initialBalance
         : (typeof acc.balance === 'number' ? acc.balance : 0);
 
-      // Soma movimentações efetivadas desta conta: receitas entram (+), despesas saem (-)
+      // Soma movimentações efetivadas desta conta que afetam saldo bancário
       const txDelta = transactions
-        .filter(t => t && t.accountId === acc.id && t.status === 'paid')
+        .filter(t => {
+          if (!t || t.accountId !== acc.id || t.status !== 'paid') return false;
+          // Se affectsBalance for explicitamente false ou for transação de conta a pagar sem flag de débito, não debita
+          if (t.affectsBalance === false) return false;
+          if (t.id && t.id.startsWith('tx-bill-') && t.affectsBalance !== true) return false;
+          return true;
+        })
         .reduce((sum, t) => {
           const val = Number(t.amount) || 0;
           return sum + (t.type === 'income' ? val : -val);
@@ -525,7 +535,12 @@ export default function App() {
         if (acc) {
           const baseBal = typeof acc.initialBalance === 'number' ? acc.initialBalance : (Number(acc.balance) || 0);
           const txDelta = nextTxs
-            .filter(t => t && t.accountId === accId && t.status === 'paid')
+            .filter(t => {
+              if (!t || t.accountId !== accId || t.status !== 'paid') return false;
+              if (t.affectsBalance === false) return false;
+              if (t.id && t.id.startsWith('tx-bill-') && t.affectsBalance !== true) return false;
+              return true;
+            })
             .reduce((sum, t) => {
               const val = Number(t.amount) || 0;
               return sum + (t.type === 'income' ? val : -val);
@@ -1082,6 +1097,7 @@ export default function App() {
       lastPaidMonth: bill.lastPaidMonth || '',
       iconName: bill.iconName || '',
       transactionIds: bill.transactionIds || [],
+      deductFromBalance: bill.deductFromBalance === true,
     };
 
     // Atualiza estado local de forma estritamente deduplicada por ID
@@ -1119,6 +1135,7 @@ export default function App() {
       lastPaidMonth: bill.lastPaidMonth || '',
       iconName: bill.iconName || '',
       transactionIds: bill.transactionIds || [],
+      deductFromBalance: bill.deductFromBalance === true,
     };
 
     if (currentUser) {
@@ -1187,7 +1204,11 @@ export default function App() {
     const nextPaid = (bill.paidInstallments || 0) + 1;
     const nextDueDate = addMonthsToDate(bill.dueDate, 1);
 
-    // Cria a transação de despesa PAGA que debita imediatamente do saldo da conta e do Saldo Disponível
+    // Transação de despesa gerada para controle do pagamento
+    // Conforme especificado pelo usuário: pagar uma conta é apenas para controle (evita desconto duplicado,
+    // como faculdade já descontada em folha de pagamento). Não desconta do Saldo Disponível a menos que
+    // o usuário configure expressamente deductFromBalance: true na conta.
+    const shouldDeduct = bill.deductFromBalance === true;
     const txId = `tx-bill-${bill.id}-${Date.now()}-${generateId()}`;
     const txDescription = isFixed
       ? `Conta Fixa: ${bill.name}`
@@ -1203,8 +1224,10 @@ export default function App() {
       status: 'paid',
       accountId: targetAccount ? targetAccount.id : targetAccountId,
       paymentMethod: 'Pix',
-      notes: `Débito automático de conta a pagar: ${bill.name}`,
+      notes: `Registro de controle de conta paga: ${bill.name}${shouldDeduct ? ' (debitado)' : ' (controle — sem debitar saldo)'}`,
       createdAt: new Date().toISOString(),
+      cycleMonth: currentMonth,
+      affectsBalance: shouldDeduct, // Controle por padrão: não debita do Saldo Disponível
     };
 
     const nextTxs = [newTx, ...transactions];
@@ -1237,16 +1260,18 @@ export default function App() {
           userId: currentUser.uid,
           updatedAt: new Date().toISOString(),
         });
-        await syncAccountsToFirestore([newTx.accountId], nextTxs);
+        if (shouldDeduct) {
+          await syncAccountsToFirestore([newTx.accountId], nextTxs);
+        }
       } catch (err) {
-        console.error('Erro ao registrar pagamento e débito da conta no Firestore:', err);
+        console.error('Erro ao registrar pagamento de conta no Firestore:', err);
       }
     }
 
     if (isFixed) {
-      showToast(`Conta fixa "${bill.name}" paga! ${formatCurrency(amount)} debitado de ${targetAccount?.name || 'sua conta'}.`);
+      showToast(`Conta fixa "${bill.name}" marcada como paga! (${formatCurrency(amount)} — apenas controle, saldo intacto)`);
     } else {
-      showToast(`Parcela ${nextPaid}/${bill.totalInstallments} de "${bill.name}" paga! ${formatCurrency(amount)} debitado de ${targetAccount?.name || 'sua conta'}.`);
+      showToast(`Parcela ${nextPaid}/${bill.totalInstallments} de "${bill.name}" marcada como paga! (Apenas controle, saldo intacto)`);
     }
   };
 
@@ -1340,6 +1365,7 @@ export default function App() {
     const targetAccountId = customAccountId || bill.accountId || getMainBankAccountId(accountsWithLiveBalances);
     const targetAccount = accountsWithLiveBalances.find(a => a.id === targetAccountId) || accountsWithLiveBalances[0];
 
+    const shouldDeduct = bill.deductFromBalance === true;
     const txId = `tx-bill-${bill.id}-payoff-${Date.now()}-${generateId()}`;
     const newTx: Transaction = {
       id: txId,
@@ -1351,8 +1377,10 @@ export default function App() {
       status: 'paid',
       accountId: targetAccount ? targetAccount.id : targetAccountId,
       paymentMethod: 'Pix',
-      notes: `Quitação antecipada de ${remainingInstallments} parcelas de ${bill.name}`,
+      notes: `Quitação antecipada de ${remainingInstallments} parcelas de ${bill.name}${shouldDeduct ? ' (debitado)' : ' (controle)'}`,
       createdAt: new Date().toISOString(),
+      cycleMonth: currentMonth,
+      affectsBalance: shouldDeduct,
     };
 
     const nextTxs = [newTx, ...transactions];
@@ -1380,13 +1408,15 @@ export default function App() {
           userId: currentUser.uid,
           updatedAt: new Date().toISOString(),
         });
-        await syncAccountsToFirestore([newTx.accountId], nextTxs);
+        if (shouldDeduct) {
+          await syncAccountsToFirestore([newTx.accountId], nextTxs);
+        }
       } catch (err) {
         console.error('Erro ao quitar conta no Firestore:', err);
       }
     }
 
-    showToast(`Conta "${bill.name}" quitada integralmente! ${formatCurrency(payoffTotal)} debitado de ${targetAccount?.name || 'sua conta'}.`);
+    showToast(`Conta "${bill.name}" quitada integralmente! (Apenas para controle — saldo disponível mantido intacto)`);
   };
 
   // Reset para dados zerados (acionado via modal de confirmação)

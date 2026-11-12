@@ -36,6 +36,7 @@ export interface Transaction {
   notes?: string;
   createdAt: string;
   cycleMonth?: string; // YYYY-MM do ciclo salarial ao qual o lançamento pertence (ex: compras feitas até o 5º dia útil do mês seguinte com salário anterior)
+  affectsBalance?: boolean; // Se false, é apenas para controle (ex: contas a pagar, faculdade/desconto em folha) e não debita do Saldo Disponível
 }
 
 export interface MonthCycleClosure {
@@ -75,6 +76,7 @@ export interface PayableBill {
   lastPaidMonth?: string; // YYYY-MM do mês em que foi paga pela última vez
   iconName?: string; // Droplets, Zap, Smartphone, Wifi, Home, Tv, etc.
   transactionIds?: string[]; // IDs das transações de despesa geradas pelos pagamentos para permitir estorno
+  deductFromBalance?: boolean; // Se true, debita do saldo disponível. Por padrão false (apenas para controle de pagamento / evita desconto duplicado com faculdade em folha)
 }
 
 export interface FilterOptions {

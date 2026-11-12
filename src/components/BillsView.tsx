@@ -162,6 +162,7 @@ export const BillsView: React.FC<BillsViewProps> = ({
   const [accountId, setAccountId] = useState(defaultDebitAccountId);
   const [notes, setNotes] = useState('');
   const [selectedIcon, setSelectedIcon] = useState('Receipt');
+  const [deductFromBalance, setDeductFromBalance] = useState(false);
 
   // Mantém accountId sincronizado com a conta padrão quando carregar
   React.useEffect(() => {
@@ -184,6 +185,7 @@ export const BillsView: React.FC<BillsViewProps> = ({
     setAccountId(defaultDebitAccountId);
     setNotes('');
     setSelectedIcon('Receipt');
+    setDeductFromBalance(false);
     setIsSubmitting(false);
     if (onCloseCreateModal) {
       onCloseCreateModal();
@@ -203,6 +205,7 @@ export const BillsView: React.FC<BillsViewProps> = ({
     setAccountId(defaultDebitAccountId);
     setNotes('');
     setSelectedIcon(initialType === 'fixed' ? 'Droplets' : 'CreditCard');
+    setDeductFromBalance(false);
     const today = new Date();
     setDueDate(today.toISOString().split('T')[0]);
     setIsSubmitting(false);
@@ -219,6 +222,7 @@ export const BillsView: React.FC<BillsViewProps> = ({
     setPaidInstallments('0');
     setDueDay(String(preset.suggestedDay));
     setSelectedIcon(preset.icon);
+    setDeductFromBalance(false);
     
     // Tenta encontrar a categoria correspondente
     const matchingCat = categories.find(c => 
@@ -231,8 +235,8 @@ export const BillsView: React.FC<BillsViewProps> = ({
     const now = new Date();
     const year = now.getFullYear();
     const month = String(now.getMonth() + 1).padStart(2, '0');
-    const day = String(preset.suggestedDay).padStart(2, '0');
-    setDueDate(`${year}-${month}-${day}`);
+    const dayNum = String(preset.suggestedDay).padStart(2, '0');
+    setDueDate(`${year}-${month}-${dayNum}`);
 
     setIsSubmitting(false);
     setIsModalOpen(true);
@@ -268,6 +272,7 @@ export const BillsView: React.FC<BillsViewProps> = ({
     setAccountId(bill.accountId || defaultDebitAccountId);
     setNotes(bill.notes || '');
     setSelectedIcon(bill.iconName || (isFixed ? 'Receipt' : 'CreditCard'));
+    setDeductFromBalance(bill.deductFromBalance === true);
     setIsSubmitting(false);
     setIsModalOpen(true);
   };
@@ -317,6 +322,7 @@ export const BillsView: React.FC<BillsViewProps> = ({
       lastPaidMonth: editingBill?.lastPaidMonth || '',
       iconName: selectedIcon || (isFixed ? 'Receipt' : 'CreditCard'),
       transactionIds: editingBill?.transactionIds || [],
+      deductFromBalance: deductFromBalance === true,
     };
 
     if (editingBill) {
@@ -881,13 +887,16 @@ export const BillsView: React.FC<BillsViewProps> = ({
                           <span className="text-zinc-600">•</span>
                           <span className="flex items-center gap-1 text-[11px] text-zinc-300">
                             <Landmark className="w-3 h-3 text-lime-400 shrink-0" />
-                            <span>Debita de:</span>
-                            <strong className="text-zinc-200 font-medium">
-                              {accounts.find(a => a.id === (bill.accountId || defaultDebitAccountId))?.name || 'Conta Principal (PicPay)'}
-                            </strong>
-                            {accounts.find(a => a.id === (bill.accountId || defaultDebitAccountId))?.isMain && (
-                              <span className="text-[9px] font-bold px-1 py-0.2 rounded-sm bg-lime-400/15 text-lime-400 border border-lime-400/30">
-                                Saldo Disponível
+                            {bill.deductFromBalance ? (
+                              <>
+                                <span>Debita de:</span>
+                                <strong className="text-zinc-200 font-medium">
+                                  {accounts.find(a => a.id === (bill.accountId || defaultDebitAccountId))?.name || 'Conta Principal (PicPay)'}
+                                </strong>
+                              </>
+                            ) : (
+                              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-lime-400/10 text-lime-400 border border-lime-400/20">
+                                Apenas Controle (não desconta do saldo)
                               </span>
                             )}
                           </span>
@@ -1315,26 +1324,44 @@ export const BillsView: React.FC<BillsViewProps> = ({
                 </select>
               </div>
 
-              {/* CONTA PARA DÉBITO AUTOMÁTICO */}
-              <div>
-                <label className="block text-xs font-semibold text-zinc-300 mb-1 flex items-center justify-between">
-                  <span>Debitar da Conta / Carteira</span>
-                  <span className="text-[10px] text-lime-400 font-normal">Debita automaticamente ao pagar</span>
-                </label>
-                <select
-                  value={accountId}
-                  onChange={e => setAccountId(e.target.value)}
-                  className="w-full bg-zinc-950 border border-zinc-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-hidden focus:border-lime-400"
-                >
-                  {accounts.filter(a => a.type !== 'credit').map(a => (
-                    <option key={a.id} value={a.id}>
-                      {a.name} ({a.institution}) {a.isMain ? '★ Principal (Saldo Disponível)' : ''}
-                    </option>
-                  ))}
-                </select>
-                <span className="text-[10px] text-zinc-500 mt-0.5 block">
-                  Ao pagar esta conta, o valor é debitado automaticamente do saldo da conta e do seu Saldo Disponível.
-                </span>
+              {/* MODO DE CONTROLE VS DÉBITO */}
+              <div className="p-3 bg-zinc-950/80 border border-zinc-800 rounded-xl space-y-2">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <label className="text-xs font-semibold text-zinc-200 block">
+                      Apenas para controle de pagamento
+                    </label>
+                    <p className="text-[10px] text-zinc-400 mt-0.5 leading-relaxed">
+                      Recomendado para contas já descontadas em folha (ex: faculdade, plano de saúde) ou pagas fora do saldo principal. <strong>Não desconta do Saldo Disponível</strong> ao marcar como paga.
+                    </p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={!deductFromBalance}
+                    onChange={e => setDeductFromBalance(!e.target.checked)}
+                    className="w-4 h-4 accent-lime-400 rounded-sm cursor-pointer ml-3 shrink-0"
+                  />
+                </div>
+
+                {deductFromBalance && (
+                  <div className="pt-2 border-t border-zinc-800 animate-in fade-in duration-150">
+                    <label className="block text-xs font-semibold text-zinc-300 mb-1 flex items-center justify-between">
+                      <span>Debitar da Conta / Carteira</span>
+                      <span className="text-[10px] text-rose-400 font-normal">Irá subtrair do saldo</span>
+                    </label>
+                    <select
+                      value={accountId}
+                      onChange={e => setAccountId(e.target.value)}
+                      className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-hidden focus:border-lime-400"
+                    >
+                      {accounts.filter(a => a.type !== 'credit').map(a => (
+                        <option key={a.id} value={a.id}>
+                          {a.name} ({a.institution}) {a.isMain ? '★ Principal (Saldo Disponível)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
 
               {/* ANOTAÇÕES */}

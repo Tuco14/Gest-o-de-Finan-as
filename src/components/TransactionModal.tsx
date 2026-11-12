@@ -51,6 +51,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
   const [status, setStatus] = useState<TransactionStatus>('paid');
   const [notes, setNotes] = useState('');
   const [cycleMonth, setCycleMonth] = useState<string>(currentMonth);
+  const [affectsBalance, setAffectsBalance] = useState<boolean>(true);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -68,6 +69,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       setStatus(editingTransaction.status);
       setNotes(editingTransaction.notes || '');
       setCycleMonth(editingTransaction.cycleMonth || editingTransaction.date?.substring(0, 7) || currentMonth);
+      setAffectsBalance(editingTransaction.affectsBalance !== false);
       setErrors({});
     } else {
       setType(initialType);
@@ -112,6 +114,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       setPaymentMethod('Pix');
       setStatus('paid');
       setNotes('');
+      setAffectsBalance(true);
       setErrors({});
     }
   }, [isOpen, editingTransaction, initialType, currentMonth, categories, accounts]);
@@ -166,6 +169,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       notes: notes.trim() || undefined,
       createdAt: editingTransaction ? editingTransaction.createdAt : new Date().toISOString(),
       cycleMonth: cycleMonth || currentMonth,
+      affectsBalance: type === 'expense' ? affectsBalance : true,
     };
 
     onSave(transactionData);
@@ -459,6 +463,26 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
               </button>
             </div>
           </div>
+
+          {/* Opção para despesas apenas de controle (ex: faculdade ou desconto em folha) */}
+          {type === 'expense' && (
+            <div className="p-3 bg-zinc-800/60 rounded-xl border border-zinc-700/70 flex items-center justify-between gap-3">
+              <div>
+                <span className="text-xs font-semibold text-zinc-200 block">
+                  Debitar do Saldo Disponível da Conta?
+                </span>
+                <span className="text-[10px] text-zinc-400 block mt-0.5 leading-relaxed">
+                  Desmarque caso este gasto já tenha sido descontado do seu salário em folha (ex: faculdade, benefícios) ou sirva apenas para acompanhamento de gastos.
+                </span>
+              </div>
+              <input
+                type="checkbox"
+                checked={affectsBalance}
+                onChange={e => setAffectsBalance(e.target.checked)}
+                className="w-4 h-4 accent-lime-400 rounded-sm cursor-pointer shrink-0"
+              />
+            </div>
+          )}
 
           {/* Observações / Notas */}
           <div>
